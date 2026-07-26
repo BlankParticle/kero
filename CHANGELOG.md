@@ -12,6 +12,9 @@ set in the Xcode project.
 
 ## [unrelease]
 
+- Choose which terminal emulator drives your panes: Settings → Terminal → Backend now offers Ghostty (the default, unchanged) or Alacritty. The choice applies to terminals you open from then on, so existing panes keep running. Alacritty panes match Kero’s fonts, colors, themes, selection, scrollback, find, clipboard protections, OSC 8 links, mouse-aware TUIs, and styled history restore; terminal image protocols and Ghostty-specific OSC 9 progress and notification sequences remain Ghostty-only
+- Color emoji in Alacritty panes now keep their original artwork instead of being recolored to match the surrounding text
+
 ## [0.1.26]
 
 - Opening the Ctrl-Tab switcher no longer highlights whichever tab happens to be under the stationary pointer
