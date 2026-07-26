@@ -94,6 +94,7 @@ final class TerminalMetalRenderer {
 
     // MARK: - Frame
 
+    @discardableResult
     func render(
         snapshot: KeroSnapshot,
         metrics: AlacrittyMetrics,
@@ -101,18 +102,34 @@ final class TerminalMetalRenderer {
         scale: CGFloat,
         dirtyRows: [Int]?,
         in drawable: CAMetalDrawable,
-        viewportSize: CGSize
-    ) {
+        viewportSize: CGSize,
+        onPresented: (@Sendable () -> Void)? = nil,
+        waitUntilCompleted: Bool = false
+    ) -> Bool {
         if atlas == nil {
             atlas = TerminalGlyphAtlas(device: device, metrics: metrics, scale: scale)
         }
-        atlas?.reset(metrics: metrics, scale: scale)
-        guard let atlas else { return }
+        guard let atlas else { return false }
+        let generationBeforeReset = atlas.generation
+        atlas.reset(metrics: metrics, scale: scale)
+        let resetAtlas = atlas.generation != generationBeforeReset
 
+        let atlasGenerationBeforeBuild = atlas.generation
         build(
             snapshot: snapshot, metrics: metrics, padding: padding,
-            atlas: atlas, dirtyRows: dirtyRows, viewportSize: viewportSize
+            atlas: atlas,
+            dirtyRows: resetAtlas ? nil : dirtyRows,
+            viewportSize: viewportSize
         )
+        if atlas.generation != atlasGenerationBeforeBuild {
+            // The atlas outgrew its initial texture while building this
+            // frame. Its old UVs are invalid, including those in cached clean
+            // rows, so rebuild the complete grid once against the new atlas.
+            build(
+                snapshot: snapshot, metrics: metrics, padding: padding,
+                atlas: atlas, dirtyRows: nil, viewportSize: viewportSize
+            )
+        }
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = drawable.texture
@@ -128,7 +145,7 @@ final class TerminalMetalRenderer {
 
         guard let commands = queue.makeCommandBuffer(),
               let encoder = commands.makeRenderCommandEncoder(descriptor: pass)
-        else { return }
+        else { return false }
 
         if !instances.isEmpty, let buffer = uploadInstances() {
             var viewport = SIMD2<Float>(Float(viewportSize.width), Float(viewportSize.height))
@@ -146,8 +163,16 @@ final class TerminalMetalRenderer {
         }
 
         encoder.endEncoding()
+        if let onPresented {
+            drawable.addPresentedHandler { _ in onPresented() }
+        }
         commands.present(drawable)
         commands.commit()
+        if waitUntilCompleted {
+            commands.waitUntilCompleted()
+            return commands.status != .error
+        }
+        return true
     }
 
     private func uploadInstances() -> MTLBuffer? {

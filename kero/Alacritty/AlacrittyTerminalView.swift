@@ -34,7 +34,15 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     private var gridSize = (columns: 0, rows: 0)
     private var markedText = ""
     private let markedTextField = NSTextField(labelWithString: "")
-    private var isSurfaceVisible = true
+    private var isSurfaceVisible = false
+    /// Covers Metal while a parked surface is moving back into a real pane.
+    /// The cover lives above the drawable so the GPU can acquire and present
+    /// the first correctly-sized frame before the terminal becomes visible.
+    private let presentationCoverLayer = CALayer()
+    private var isAwaitingVisibleFrame = true
+    private var presentationGeneration: UInt64 = 0
+    private var lastPresentedSize: CGSize?
+    private var lastPresentedScale: CGFloat?
     private var pendingEvents: [(kind: UInt32, payload: Data)] = []
     private var trackingArea: NSTrackingArea?
     private var reportingMouseButton = false
@@ -184,14 +192,47 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     func setSurfaceVisible(_ visible: Bool) {
         // The flag stops wakeups from scheduling frames nothing will
         // composite; parking also drops renderer-owned GPU allocations below.
+        let changed = visible != isSurfaceVisible
+        guard changed else {
+            if visible { updateFocusReport() }
+            return
+        }
         isSurfaceVisible = visible
+        presentationGeneration &+= 1
         if visible {
-            scheduleRender(force: true)
+            if !(layer is CAMetalLayer) {
+                replaceBackingLayer(with: makeBackingLayer())
+            }
+            isAwaitingVisibleFrame = true
+            setPresentationCoverVisible(true)
+            needsUnconditionalRedraw = true
+            // Parking releases the drawable pool, so build the returning
+            // tab's first frame synchronously while SwiftUI is still laying
+            // out the new pane. Core Animation then commits a ready drawable
+            // instead of one blank frame, without every parked tab retaining
+            // a full-window IOSurface.
+            if !renderFrame(waitUntilCompleted: true) {
+                scheduleRender(force: true)
+            }
             updateFocusReport()
         } else {
             // Drop the glyph atlas and row/instance buffers while parked,
             // matching Ghostty's occluded-surface GPU memory behavior.
             metalRenderer = nil
+            // CAMetalLayer retains its current display drawable even after
+            // `device` becomes nil. Replace the layer entirely so Core
+            // Animation releases that drawable and its pool. A 1800×1600
+            // BGRA drawable is ~11.5 MiB, so one per parked tab dominates
+            // multi-tab memory.
+            presentationCoverLayer.removeFromSuperlayer()
+            let parkedLayer = CALayer()
+            parkedLayer.isOpaque = true
+            parkedLayer.backgroundColor = Theme.background.cgColor
+            parkedLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+            replaceBackingLayer(with: parkedLayer)
+            lastPresentedSize = nil
+            lastPresentedScale = nil
+            isAwaitingVisibleFrame = true
             cursorTimer?.invalidate()
             cursorTimer = nil
             cursorBlinking = false
@@ -205,6 +246,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             size: CGFloat(AppSettings.shared.fontSize),
             fontThicken: AppSettings.shared.fontThicken
         )
+        presentationCoverLayer.backgroundColor = Theme.background.cgColor
         var theme = AlacrittyTheme.current()
         if let handle {
             withUnsafePointer(to: &theme) { kero_alacritty_set_theme(handle, $0) }
@@ -233,6 +275,12 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
 
     override func setFrameSize(_ newSize: NSSize) {
         let changed = newSize != frame.size
+        if changed, isSurfaceVisible, isAwaitingVisibleFrame {
+            // Invalidate a startup-sized frame that completed while Auto
+            // Layout was still moving this surface out of parking.
+            presentationGeneration &+= 1
+            setPresentationCoverVisible(true)
+        }
         super.setFrameSize(newSize)
         synchronizeGridSize()
         // Padding remainder changes even when the number of rows/columns does
@@ -272,11 +320,31 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         layer.pixelFormat = .bgra8Unorm
         layer.framebufferOnly = true
         layer.isOpaque = true
-        // Resize should not stretch the previous frame while the grid catches
-        // up; redraw against the new size instead.
+        // Terminal frames are cheap enough to keep up with the display link;
+        // a third full-window drawable only adds one pane-sized IOSurface
+        // (~15 MiB on a large Retina window) without improving throughput.
+        layer.maximumDrawableCount = 2
+        // Core Animation's default `.resize` gravity can stretch a startup-
+        // sized drawable across the real pane for a few frames on first
+        // attachment, making restored text flash at a much larger size. Keep
+        // any previous drawable pixel-accurate while the correct frame arrives.
+        layer.contentsGravity = .topLeft
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         layer.needsDisplayOnBoundsChange = true
+        presentationCoverLayer.backgroundColor = Theme.background.cgColor
+        presentationCoverLayer.frame = layer.bounds
+        presentationCoverLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        presentationCoverLayer.isHidden = false
+        layer.addSublayer(presentationCoverLayer)
         return layer
+    }
+
+    private func replaceBackingLayer(with newLayer: CALayer) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        newLayer.frame = bounds
+        layer = newLayer
+        CATransaction.commit()
     }
 
     /// Coalesces a burst of PTY wakeups into one frame per run-loop turn.
@@ -305,14 +373,15 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         scheduleRender(force: true)
     }
 
-    private func renderFrame() {
-        guard let handle, let metalLayer = layer as? CAMetalLayer else { return }
+    @discardableResult
+    private func renderFrame(waitUntilCompleted: Bool = false) -> Bool {
+        guard let handle, let metalLayer = layer as? CAMetalLayer else { return false }
         if metalRenderer == nil, let metalDevice {
             metalRenderer = TerminalMetalRenderer(device: metalDevice)
         }
         guard let renderer = metalRenderer else {
             NSLog("kero: no Metal device; the Alacritty backend cannot draw")
-            return
+            return false
         }
 
         // A wakeup means bytes arrived, not that the grid moved. Ask the
@@ -332,20 +401,21 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             dirtyRows = (0..<damage.rows_len).map { Int(rows[$0]) }
         } else {
             AlacrittyRenderStats.shared.skipped()
-            return
+            return true
         }
         needsUnconditionalRedraw = false
         let renderStart = CFAbsoluteTimeGetCurrent()
         defer { AlacrittyRenderStats.shared.frame(seconds: CFAbsoluteTimeGetCurrent() - renderStart) }
 
         let scale = window?.backingScaleFactor ?? 2
+        metalLayer.device = metalDevice
         metalLayer.contentsScale = scale
         let size = bounds.size
-        guard size.width > 0, size.height > 0 else { return }
+        guard size.width > 0, size.height > 0 else { return false }
         metalLayer.drawableSize = CGSize(
             width: size.width * scale, height: size.height * scale
         )
-        guard let drawable = metalLayer.nextDrawable() else { return }
+        guard let drawable = metalLayer.nextDrawable() else { return false }
 
         var snapshot = KeroSnapshot()
         kero_alacritty_snapshot(handle, &snapshot)
@@ -357,16 +427,76 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         } else if !hasEffectiveTerminalFocus, snapshot.cursor_shape == 0 {
             snapshot.cursor_shape = 3
         }
-        renderer.render(
+        let generation = presentationGeneration
+        let presentationToken = token
+        let tracksPresentedGeometry =
+            !waitUntilCompleted
+            && (isAwaitingVisibleFrame
+                || lastPresentedSize != size
+                || lastPresentedScale != scale)
+        let onPresented: (@Sendable () -> Void)?
+        if tracksPresentedGeometry {
+            onPresented = {
+                DispatchQueue.main.async {
+                    AlacrittyRegistry.shared.view(for: presentationToken)?.didPresentFrame(
+                        generation: generation,
+                        size: size,
+                        scale: scale
+                    )
+                }
+            }
+        } else {
+            onPresented = nil
+        }
+        let submitted = renderer.render(
             snapshot: snapshot,
             metrics: metrics,
             padding: Self.padding,
             scale: scale,
             dirtyRows: dirtyRows,
             in: drawable,
-            viewportSize: size
+            viewportSize: size,
+            onPresented: onPresented,
+            waitUntilCompleted: waitUntilCompleted
         )
+        if submitted, waitUntilCompleted {
+            lastPresentedSize = size
+            lastPresentedScale = scale
+            isAwaitingVisibleFrame = false
+            setPresentationCoverVisible(false)
+        }
         AlacrittyRenderStats.shared.rebuilt(rows: dirtyRows?.count ?? snapshot.rows)
+        return submitted
+    }
+
+    private func didPresentFrame(
+        generation: UInt64,
+        size: CGSize,
+        scale: CGFloat
+    ) {
+        guard generation == presentationGeneration else { return }
+        lastPresentedSize = size
+        lastPresentedScale = scale
+        guard isAwaitingVisibleFrame else { return }
+        let currentScale = window?.backingScaleFactor ?? 2
+        guard isSurfaceVisible,
+              bounds.size == size,
+              currentScale == scale
+        else {
+            // Geometry changed after this command buffer was submitted. Its
+            // drawable stays behind the cover; render another at the new size.
+            if isSurfaceVisible { scheduleRender(force: true) }
+            return
+        }
+        isAwaitingVisibleFrame = false
+        setPresentationCoverVisible(false)
+    }
+
+    private func setPresentationCoverVisible(_ visible: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        presentationCoverLayer.isHidden = !visible
+        CATransaction.commit()
     }
 
     private func updateMarkedTextOverlay(snapshot: KeroSnapshot) {

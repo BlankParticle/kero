@@ -56,9 +56,13 @@ final class TerminalGlyphAtlas {
         let isColor: Bool
     }
 
-    private static let dimension = 2048
+    private static let initialDimension = 1024
+    private static let maximumDimension = 2048
 
-    let texture: MTLTexture
+    private let device: MTLDevice
+    private(set) var texture: MTLTexture
+    private(set) var generation: UInt64 = 0
+    private var dimension: Int
     private var scale: CGFloat
     private var entries: [Key: Entry] = [:]
 
@@ -71,16 +75,19 @@ final class TerminalGlyphAtlas {
     private var metrics: AlacrittyMetrics
 
     init?(device: MTLDevice, metrics: AlacrittyMetrics, scale: CGFloat) {
+        let dimension = Self.initialDimension
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .bgra8Unorm,
-            width: Self.dimension,
-            height: Self.dimension,
+            width: dimension,
+            height: dimension,
             mipmapped: false
         )
         descriptor.usage = .shaderRead
         descriptor.storageMode = .managed
         guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        self.device = device
         self.texture = texture
+        self.dimension = dimension
         self.metrics = metrics
         self.scale = max(scale, 1)
     }
@@ -101,6 +108,7 @@ final class TerminalGlyphAtlas {
         shelfY = 0
         shelfHeight = 0
         isFull = false
+        generation &+= 1
     }
 
     /// The atlas entry for a glyph, rasterizing it on first use. Nil for a
@@ -147,7 +155,7 @@ final class TerminalGlyphAtlas {
         let pixelWidth = Int(((bounds.width + padding * 2) * scale).rounded(.up))
         let pixelHeight = Int(((bounds.height + padding * 2) * scale).rounded(.up))
         guard pixelWidth > 0, pixelHeight > 0,
-              pixelWidth <= Self.dimension, pixelHeight <= Self.dimension
+              pixelWidth <= dimension, pixelHeight <= dimension
         else { return nil }
 
         guard let origin = allocate(width: pixelWidth, height: pixelHeight) else { return nil }
@@ -183,10 +191,16 @@ final class TerminalGlyphAtlas {
             bytesPerRow: pixelWidth * 4
         )
 
-        let dimension = Float(Self.dimension)
+        let atlasDimension = Float(dimension)
         return Entry(
-            uvOrigin: SIMD2(Float(origin.x) / dimension, Float(origin.y) / dimension),
-            uvSize: SIMD2(Float(pixelWidth) / dimension, Float(pixelHeight) / dimension),
+            uvOrigin: SIMD2(
+                Float(origin.x) / atlasDimension,
+                Float(origin.y) / atlasDimension
+            ),
+            uvSize: SIMD2(
+                Float(pixelWidth) / atlasDimension,
+                Float(pixelHeight) / atlasDimension
+            ),
             size: SIMD2(Float(pixelWidth) / Float(scale), Float(pixelHeight) / Float(scale)),
             bearing: SIMD2(Float(bounds.minX - padding), Float(bounds.minY - padding)),
             isColor: isColor
@@ -210,13 +224,16 @@ final class TerminalGlyphAtlas {
     }
 
     private func allocate(width: Int, height: Int) -> (x: Int, y: Int)? {
-        if shelfX + width > Self.dimension {
+        if shelfX + width > dimension {
             // Start a new shelf below the tallest glyph on this one.
             shelfX = 0
             shelfY += shelfHeight
             shelfHeight = 0
         }
-        guard shelfY + height <= Self.dimension else {
+        if shelfY + height > dimension, grow() {
+            return allocate(width: width, height: height)
+        }
+        guard shelfY + height <= dimension else {
             isFull = true
             return nil
         }
@@ -224,5 +241,37 @@ final class TerminalGlyphAtlas {
         shelfX += width
         shelfHeight = max(shelfHeight, height)
         return origin
+    }
+
+    /// Most terminal sessions use far fewer than a thousand distinct glyph
+    /// variants, which fit comfortably in a 1024² atlas (4 MiB). Grow to the
+    /// previous 2048² capacity only for a session that actually needs it.
+    ///
+    /// Growth invalidates every existing UV. The renderer observes
+    /// `generation` and rebuilds all cached rows once against the new texture.
+    private func grow() -> Bool {
+        guard dimension < Self.maximumDimension else { return false }
+        let nextDimension = min(dimension * 2, Self.maximumDimension)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: nextDimension,
+            height: nextDimension,
+            mipmapped: false
+        )
+        descriptor.usage = .shaderRead
+        descriptor.storageMode = .managed
+        guard let nextTexture = device.makeTexture(descriptor: descriptor) else {
+            return false
+        }
+
+        texture = nextTexture
+        dimension = nextDimension
+        entries.removeAll(keepingCapacity: true)
+        shelfX = 0
+        shelfY = 0
+        shelfHeight = 0
+        isFull = false
+        generation &+= 1
+        return true
     }
 }

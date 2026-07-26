@@ -26,8 +26,6 @@ struct TerminalHostView: NSViewRepresentable {
         container.terminal = session.surface
         container.focusOnAppear = isFocused
         let terminal = session.surface
-        // Coming out of parking: let the renderer draw again.
-        terminal.setSurfaceVisible(true)
         terminal.onBecomeFirstResponder = onFocused
         terminal.splitTarget.onSplit = onSplit
         let scrollbar = session.overlayScrollbar
@@ -52,15 +50,19 @@ struct TerminalHostView: NSViewRepresentable {
             scrollbar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             scrollbar.widthAnchor.constraint(equalToConstant: OverlayScrollbarView.stripWidth),
         ])
+        // A parked Metal surface has discarded its drawable pool. Activate it
+        // only after Auto Layout has assigned the real pane geometry, so its
+        // first replacement drawable is created at the correct size.
+        container.activateSurfaceAfterLayout()
         context.coordinator.isFocused = isFocused
         return container
     }
 
     func updateNSView(_ view: NSView, context: Context) {
-        session.surface.setSurfaceVisible(true)
         session.surface.onBecomeFirstResponder = onFocused
         session.surface.splitTarget.onSplit = onSplit
         let container = view as? TerminalContainerView
+        container?.activateSurfaceAfterLayout()
         container?.focusOnAppear = isFocused
         // Take focus only on the unfocused→focused edge (keyboard navigation,
         // a split landing here), never on every render — that would fight the
@@ -69,6 +71,20 @@ struct TerminalHostView: NSViewRepresentable {
             container.requestTerminalFocus()
         }
         context.coordinator.isFocused = isFocused
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        guard let container = view as? TerminalContainerView,
+              let terminal = container.terminal as? any TerminalBackendSurface
+        else { return }
+        // These closures originate on PaneView and therefore capture its
+        // PaneContent, including the same TerminalSession that owns `terminal`.
+        // Clear them whenever SwiftUI removes this host so a closed tab cannot
+        // leave the session and its renderer in a retain cycle. A parked
+        // session gets fresh callbacks when its host is recreated.
+        terminal.onBecomeFirstResponder = nil
+        terminal.splitTarget.onSplit = nil
+        container.terminal = nil
     }
 
     final class Coordinator {
@@ -163,6 +179,7 @@ private final class TerminalContainerView: NSView {
         }
     }
     private var pendingFocusRequest = false
+    private var needsSurfaceActivation = false
 
     deinit {
         NotificationCenter.default.removeObserver(self)
@@ -182,9 +199,30 @@ private final class TerminalContainerView: NSView {
                 name: NSWindow.didBecomeKeyNotification,
                 object: window
             )
+            if needsSurfaceActivation {
+                needsLayout = true
+            }
         }
         guard focusOnAppear else { return }
         requestTerminalFocus()
+    }
+
+    func activateSurfaceAfterLayout() {
+        needsSurfaceActivation = true
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        guard needsSurfaceActivation,
+              window != nil,
+              bounds.width > 0, bounds.height > 0,
+              let terminal = terminal as? any TerminalBackendSurface,
+              terminal.window != nil,
+              terminal.bounds.width > 0, terminal.bounds.height > 0
+        else { return }
+        needsSurfaceActivation = false
+        terminal.setSurfaceVisible(true)
     }
 
     @objc private func windowDidBecomeKey(_ notification: Notification) {

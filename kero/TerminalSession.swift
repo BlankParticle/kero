@@ -122,6 +122,13 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     /// or been force-stopped. Detaching first can make a backend wait
     /// synchronously for a process that ignored SIGHUP.
     private func beginTeardown(processAlive: Bool, notifyExit: Bool) {
+        // TerminalHostView normally clears these while dismantling, but close
+        // teardown must not depend on a later SwiftUI reconciliation pass.
+        // Both callbacks originate on PaneView and capture this session.
+        surface.setSurfaceVisible(false)
+        surface.onBecomeFirstResponder = nil
+        surface.splitTarget.onSplit = nil
+
         if processAlive {
             _ = shellPid // Cache it before `hasExited` changes.
             signalTerminalJob(SIGHUP)

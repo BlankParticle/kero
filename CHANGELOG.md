@@ -12,6 +12,10 @@ set in the Xcode project.
 
 ## [unrelease]
 
+- Restored Alacritty sessions no longer briefly stretch their text when first opened or blink when revisiting tabs
+- Closing a terminal tab now releases its session and renderer memory instead of retaining them through pane callbacks
+- Inactive Alacritty tabs now release their full-window Metal drawable pools, substantially reducing memory use with several sessions open
+- Alacritty terminals now use double buffering and grow their glyph atlas only when needed, reducing idle GPU memory without limiting the available character set
 - Choose which terminal emulator drives your panes: Settings → Terminal → Backend now offers Ghostty (the default, unchanged) or Alacritty. The choice applies to terminals you open from then on, so existing panes keep running. Alacritty panes match Kero’s fonts, colors, themes, selection, scrollback, find, clipboard protections, OSC 8 links, mouse-aware TUIs, and styled history restore; terminal image protocols and Ghostty-specific OSC 9 progress and notification sequences remain Ghostty-only
 - Color emoji in Alacritty panes now keep their original artwork instead of being recolored to match the surrounding text
 
