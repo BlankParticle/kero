@@ -6,6 +6,7 @@
 import AppKit
 import Darwin
 import GhosttyTheme
+import IOSurface
 import Metal
 import QuartzCore
 
@@ -43,6 +44,10 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     private var presentationGeneration: UInt64 = 0
     private var lastPresentedSize: CGSize?
     private var lastPresentedScale: CGFloat?
+    /// The last drawable's storage can be shown by an ordinary CALayer while
+    /// Kero is inactive. Retaining one frame is much cheaper than keeping the
+    /// CAMetalLayer and its full triple-sized drawable pool alive.
+    private var lastPresentedSurface: IOSurface?
     private var pendingEvents: [(kind: UInt32, payload: Data)] = []
     private var trackingArea: NSTrackingArea?
     private var reportingMouseButton = false
@@ -152,13 +157,72 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             NSLog("kero: failed to start the Alacritty backend for \(launch.program)")
             return
         }
-        startDirectoryPolling()
     }
 
-    /// A second is well under the time it takes to notice a stale tab label,
-    /// and `proc_pidinfo` on one pid is cheap enough to ignore.
-    private func startDirectoryPolling() {
-        directoryTimer?.invalidate()
+    /// Directory polling and cursor blinking are useful only for the pane the
+    /// user can currently interact with. Leaving them running for parked tabs
+    /// or while another app is active prevents the terminal heap and Metal
+    /// drawable pages from becoming cold enough for macOS to reclaim.
+    private func updateActiveTimers() {
+        updateDirectoryPolling()
+        updateCursorTimer()
+    }
+
+    private var shouldKeepMetalLayerActive: Bool {
+        isSurfaceVisible && NSApp.isActive && window?.isKeyWindow == true
+    }
+
+    private func updateBackingLayerActivity(forceFrame: Bool = false) {
+        if shouldKeepMetalLayerActive {
+            let needsMetalLayer = !(layer is CAMetalLayer)
+            guard needsMetalLayer || forceFrame else { return }
+            if needsMetalLayer {
+                lastPresentedSurface = nil
+                replaceBackingLayer(with: makeBackingLayer())
+            }
+            isAwaitingVisibleFrame = true
+            setPresentationCoverVisible(true)
+            needsUnconditionalRedraw = true
+            if !renderFrame(waitUntilCompleted: true) {
+                scheduleRender(force: true)
+            }
+        } else {
+            freezeVisibleFrame()
+        }
+    }
+
+    /// Keep the last submitted terminal image visible behind other apps and
+    /// Kero windows, but release the CAMetalLayer drawable pool and renderer.
+    /// A CAMetal drawable is IOSurface-backed, and CALayer can display that
+    /// same surface directly without copying it through the CPU.
+    private func freezeVisibleFrame() {
+        guard isSurfaceVisible, layer is CAMetalLayer else { return }
+        presentationCoverLayer.removeFromSuperlayer()
+        let frozenLayer = CALayer()
+        frozenLayer.isOpaque = true
+        frozenLayer.backgroundColor = Theme.background.cgColor
+        frozenLayer.contents = lastPresentedSurface
+        frozenLayer.contentsScale = lastPresentedScale
+            ?? window?.backingScaleFactor
+            ?? 2
+        frozenLayer.contentsGravity = .topLeft
+        frozenLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        metalRenderer = nil
+        replaceBackingLayer(with: frozenLayer)
+    }
+
+    private func updateDirectoryPolling() {
+        let shouldPoll =
+            isSurfaceVisible && NSApp.isActive && window?.isKeyWindow == true
+        guard shouldPoll else {
+            directoryTimer?.invalidate()
+            directoryTimer = nil
+            return
+        }
+        // A parked or inactive pane may have changed directories since its
+        // last poll. Catch it up before waiting for the first timer tick.
+        reportWorkingDirectory()
+        guard directoryTimer == nil else { return }
         directoryTimer = Timer.scheduledTimer(
             withTimeInterval: 1, repeats: true
         ) { [weak self] _ in
@@ -200,20 +264,8 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         isSurfaceVisible = visible
         presentationGeneration &+= 1
         if visible {
-            if !(layer is CAMetalLayer) {
-                replaceBackingLayer(with: makeBackingLayer())
-            }
-            isAwaitingVisibleFrame = true
-            setPresentationCoverVisible(true)
-            needsUnconditionalRedraw = true
-            // Parking releases the drawable pool, so build the returning
-            // tab's first frame synchronously while SwiftUI is still laying
-            // out the new pane. Core Animation then commits a ready drawable
-            // instead of one blank frame, without every parked tab retaining
-            // a full-window IOSurface.
-            if !renderFrame(waitUntilCompleted: true) {
-                scheduleRender(force: true)
-            }
+            updateBackingLayerActivity(forceFrame: true)
+            updateActiveTimers()
             updateFocusReport()
         } else {
             // Drop the glyph atlas and row/instance buffers while parked,
@@ -232,11 +284,14 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             replaceBackingLayer(with: parkedLayer)
             lastPresentedSize = nil
             lastPresentedScale = nil
+            lastPresentedSurface = nil
             isAwaitingVisibleFrame = true
             cursorTimer?.invalidate()
             cursorTimer = nil
             cursorBlinking = false
             cursorVisible = true
+            directoryTimer?.invalidate()
+            directoryTimer = nil
         }
     }
 
@@ -459,6 +514,9 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             onPresented: onPresented,
             waitUntilCompleted: waitUntilCompleted
         )
+        if submitted {
+            lastPresentedSurface = drawable.texture.iosurface
+        }
         if submitted, waitUntilCompleted {
             lastPresentedSize = size
             lastPresentedScale = scale
@@ -534,12 +592,23 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     }
 
     private func updateCursorBlinking(_ blinking: Bool) {
-        guard blinking != cursorBlinking else { return }
-        cursorBlinking = blinking
-        cursorVisible = true
-        cursorTimer?.invalidate()
-        cursorTimer = nil
-        guard blinking, isSurfaceVisible else { return }
+        if blinking != cursorBlinking {
+            cursorBlinking = blinking
+            cursorVisible = true
+        }
+        updateCursorTimer()
+    }
+
+    private func updateCursorTimer() {
+        let shouldBlink =
+            cursorBlinking && isSurfaceVisible && hasEffectiveTerminalFocus
+        guard shouldBlink else {
+            cursorTimer?.invalidate()
+            cursorTimer = nil
+            cursorVisible = true
+            return
+        }
+        guard cursorTimer == nil else { return }
         cursorTimer = Timer.scheduledTimer(
             withTimeInterval: 0.5, repeats: true
         ) { [weak self] _ in
@@ -796,6 +865,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         let accepted = super.becomeFirstResponder()
         if accepted {
             onBecomeFirstResponder?()
+            updateActiveTimers()
             scheduleRender(force: true)
             updateFocusReport()
         }
@@ -804,7 +874,10 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
 
     override func resignFirstResponder() -> Bool {
         scheduleRender(force: true)
-        DispatchQueue.main.async { [weak self] in self?.updateFocusReport() }
+        DispatchQueue.main.async { [weak self] in
+            self?.updateActiveTimers()
+            self?.updateFocusReport()
+        }
         return super.resignFirstResponder()
     }
 
@@ -813,12 +886,20 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             window.makeFirstResponder(nil)
         }
         super.viewWillMove(toWindow: newWindow)
-        DispatchQueue.main.async { [weak self] in self?.updateFocusReport() }
+        DispatchQueue.main.async { [weak self] in
+            self?.updateBackingLayerActivity()
+            self?.updateActiveTimers()
+            self?.updateFocusReport()
+        }
     }
 
     @objc private func effectiveFocusChanged(_ notification: Notification) {
+        updateBackingLayerActivity()
+        updateActiveTimers()
         updateFocusReport()
-        scheduleRender(force: true)
+        if shouldKeepMetalLayerActive {
+            scheduleRender(force: true)
+        }
     }
 
     private func updateFocusReport() {
