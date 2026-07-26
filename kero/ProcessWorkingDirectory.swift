@@ -9,9 +9,8 @@ import Foundation
 /// A process's current working directory, read from kernel metadata.
 ///
 /// A backend that reports OSC 7 tells Kero where the shell thinks it is, which
-/// is authoritative and free. This is the fallback for backends that do not —
-/// `alacritty_terminal` has no OSC 7 handling at all — and the backstop for
-/// shells with no OSC 7 integration under any backend.
+/// is authoritative and free. This is the fallback while a backend is waiting
+/// for its first report, and the backstop for shells with no OSC 7 integration.
 func processWorkingDirectory(pid: pid_t) -> String? {
     guard pid > 0 else { return nil }
     var info = proc_vnodepathinfo()

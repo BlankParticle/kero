@@ -22,15 +22,13 @@ backend they were created with.
 The Alacritty option embeds the `alacritty_terminal` emulator core and draws it
 with Kero's own Metal renderer. It supports Kero's normal terminal workflow,
 including themes, selection, scrollback, find, clipboard protection, links,
-mouse-aware TUIs, and restored history.
+mouse-aware TUIs, restored history, remote working-directory reports, OSC 9
+notifications, and OSC 9;4 progress.
 
 Compared with libghostty, the Alacritty backend currently does not support:
 
 - terminal graphics protocols
 - the Kitty keyboard protocol
-- OSC 7 working-directory events; Kero falls back to polling the local process,
-  so a remote SSH working directory cannot be tracked accurately
-- Ghostty's OSC 9 progress and notification sequences
 
 ## Download
 

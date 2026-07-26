@@ -12,6 +12,7 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 alacritty_terminal = { version = "0.26", default-features = false }
+polling = "3.11"
 
 [profile.release]
 opt-level = 3

@@ -25,6 +25,10 @@ extern "C" {
 #define KERO_EVENT_EXIT 3u
 #define KERO_EVENT_CLIPBOARD_STORE 4u
 #define KERO_EVENT_CLIPBOARD_LOAD 5u
+#define KERO_EVENT_WORKING_DIRECTORY 6u
+/// Three bytes: state (0-4), percent (0-100), and whether percent is present.
+#define KERO_EVENT_PROGRESS 7u
+#define KERO_EVENT_NOTIFICATION 8u
 
 /// Per-cell attributes in `KeroCell.flags`.
 #define KERO_CELL_INVERSE (1u << 0)

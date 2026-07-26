@@ -17,7 +17,8 @@ set in the Xcode project.
 - Inactive Alacritty tabs now release their full-window Metal drawable pools, substantially reducing memory use with several sessions open
 - Alacritty terminals now use double buffering and grow their glyph atlas only when needed, reducing idle GPU memory without limiting the available character set
 - Inactive Alacritty terminals now keep one frozen frame instead of a live Metal drawable pool and stop cursor redraws and background polling, allowing macOS to reclaim idle memory; reopening Kero or a tab refreshes it immediately
-- Choose which terminal emulator drives your panes: Settings → Terminal → Backend now offers Ghostty (the default, unchanged) or Alacritty. The choice applies to terminals you open from then on, so existing panes keep running. Alacritty panes match Kero’s fonts, colors, themes, selection, scrollback, find, clipboard protections, OSC 8 links, mouse-aware TUIs, and styled history restore; terminal graphics, Kitty keyboard input, remote working-directory events, and Ghostty OSC 9 integrations remain unsupported
+- Alacritty terminals now handle OSC 7 and OSC 9;9 working-directory reports, OSC 9 notifications, and OSC 9;4 progress indicators, including sequences split across PTY reads
+- Choose which terminal emulator drives your panes: Settings → Terminal → Backend now offers Ghostty (the default, unchanged) or Alacritty. The choice applies to terminals you open from then on, so existing panes keep running. Alacritty panes match Kero’s fonts, colors, themes, selection, scrollback, find, clipboard protections, OSC 8 links, mouse-aware TUIs, styled history restore, working-directory reports, notifications, and progress indicators; terminal graphics and Kitty keyboard input remain unsupported
 - Color emoji in Alacritty panes now keep their original artwork instead of being recolored to match the surrounding text
 
 ## [0.1.26]

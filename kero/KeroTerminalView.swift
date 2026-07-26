@@ -31,8 +31,6 @@ final class KeroTerminalView: AppTerminalView, TerminalBackendSurface {
     var lastScroll: TerminalScrollPosition?
 
     private let progressBar = KeroTerminalProgressBarView(frame: .zero)
-    private var progressReportTimer: Timer?
-    private var lastProgressValue: Int?
     private var isCapturingHistoryExport = false
     private var capturedHistoryExportPath: String?
 
@@ -48,10 +46,6 @@ final class KeroTerminalView: AppTerminalView, TerminalBackendSurface {
     convenience init(launch: TerminalLaunch) {
         self.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         start(launch: launch)
-    }
-
-    deinit {
-        progressReportTimer?.invalidate()
     }
 
     // MARK: - TerminalBackendSurface
@@ -101,52 +95,7 @@ final class KeroTerminalView: AppTerminalView, TerminalBackendSurface {
     /// at the top of the terminal, with error/pause colors and a 15-second
     /// stale-report timeout.
     func applyProgressReport(state: TerminalProgressState, percent: Int?) {
-        if case .remove = state {
-            clearProgressReport()
-            return
-        }
-
-        let resolved: Int?
-        switch state {
-        case .remove:
-            resolved = nil
-        case .set:
-            resolved = percent ?? 0
-        case .error:
-            resolved = percent ?? lastProgressValue
-        case .indeterminate:
-            resolved = nil
-        case .pause:
-            resolved = percent ?? lastProgressValue ?? 100
-        }
-
-        if let resolved {
-            lastProgressValue = min(max(resolved, 0), 100)
-        }
-        progressBar.apply(state: state, progress: lastProgressValueForDisplay(
-            state: state, resolved: resolved
-        ))
-        progressReportTimer?.invalidate()
-        progressReportTimer = Timer.scheduledTimer(
-            withTimeInterval: 15, repeats: false
-        ) { [weak self] _ in
-            self?.clearProgressReport()
-        }
-    }
-
-    private func lastProgressValueForDisplay(
-        state: TerminalProgressState, resolved: Int?
-    ) -> Int? {
-        if case .indeterminate = state { return nil }
-        guard let resolved else { return nil }
-        return min(max(resolved, 0), 100)
-    }
-
-    private func clearProgressReport() {
-        progressReportTimer?.invalidate()
-        progressReportTimer = nil
-        lastProgressValue = nil
-        progressBar.apply(state: .remove, progress: nil)
+        progressBar.applyReport(state: state, percent: percent)
     }
 
     /// Uses Ghostty's `open` export action as a synchronous host callback. The
@@ -285,17 +234,20 @@ final class KeroTerminalView: AppTerminalView, TerminalBackendSurface {
 
 /// Layer-backed progress indicator used for OSC 9;4 reports. It deliberately
 /// ignores hit testing so terminal selection and clicks pass through it.
-private final class KeroTerminalProgressBarView: NSView {
+final class KeroTerminalProgressBarView: NSView {
     private let trackLayer = CALayer()
     private let barLayer = CALayer()
     private let indeterminateAnimationKey = "keroTerminalProgressIndeterminate"
 
     private var state: TerminalProgressState = .remove
     private var progress: Int?
+    private var lastProgressValue: Int?
+    private var reportTimer: Timer?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         wantsLayer = true
+        isHidden = true
         layer?.masksToBounds = true
         trackLayer.isHidden = true
         layer?.addSublayer(trackLayer)
@@ -307,6 +259,10 @@ private final class KeroTerminalProgressBarView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        reportTimer?.invalidate()
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func layout() {
@@ -314,7 +270,53 @@ private final class KeroTerminalProgressBarView: NSView {
         updateForCurrentState(animated: false)
     }
 
-    func apply(state: TerminalProgressState, progress: Int?) {
+    func applyReport(state: TerminalProgressState, percent: Int?) {
+        if case .remove = state {
+            clearReport()
+            return
+        }
+
+        let resolved: Int?
+        switch state {
+        case .remove:
+            resolved = nil
+        case .set:
+            resolved = percent ?? 0
+        case .error:
+            resolved = percent ?? lastProgressValue
+        case .indeterminate:
+            resolved = nil
+        case .pause:
+            resolved = percent ?? lastProgressValue ?? 100
+        }
+        let clamped = resolved.map { min(max($0, 0), 100) }
+        if let clamped {
+            lastProgressValue = clamped
+        }
+
+        let displayProgress: Int?
+        if case .indeterminate = state {
+            displayProgress = nil
+        } else {
+            displayProgress = clamped
+        }
+        apply(state: state, progress: displayProgress)
+        reportTimer?.invalidate()
+        reportTimer = Timer.scheduledTimer(
+            withTimeInterval: 15, repeats: false
+        ) { [weak self] _ in
+            self?.clearReport()
+        }
+    }
+
+    private func clearReport() {
+        reportTimer?.invalidate()
+        reportTimer = nil
+        lastProgressValue = nil
+        apply(state: .remove, progress: nil)
+    }
+
+    private func apply(state: TerminalProgressState, progress: Int?) {
         self.state = state
         self.progress = progress
 

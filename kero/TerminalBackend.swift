@@ -55,7 +55,7 @@ enum TerminalBackend: String, CaseIterable, Identifiable, Sendable {
         case .libghostty:
             "Ghostty's GPU-accelerated emulator, embedded in Kero."
         case .alacritty:
-            "Alacritty's emulator core, drawn by Kero. Terminal graphics, Kitty keyboard input, remote working-directory events, and Ghostty OSC 9 integrations are not supported; open a new terminal for a change here to take effect."
+            "Alacritty's emulator core, drawn by Kero. Terminal graphics and Kitty keyboard input are not supported; open a new terminal for a change here to take effect."
         }
     }
 

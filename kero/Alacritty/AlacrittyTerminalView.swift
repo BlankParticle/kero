@@ -5,6 +5,7 @@
 
 import AppKit
 import Darwin
+import GhosttyTerminal
 import GhosttyTheme
 import IOSurface
 import Metal
@@ -55,6 +56,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     private var cursorTimer: Timer?
     private var cursorBlinking = false
     private var cursorVisible = true
+    private let progressBar = KeroTerminalProgressBarView(frame: .zero)
 
     /// Fractional scroll accumulator, so a trackpad's sub-line deltas add up
     /// to a row instead of being discarded.
@@ -62,12 +64,12 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     private var selectionAnchor: (line: Int, column: Int)?
     private let findState = AlacrittyFind()
 
-    /// `alacritty_terminal` does not implement OSC 7, so nothing pushes the
-    /// shell's directory at us the way Ghostty does. The kernel knows it, so
-    /// poll for it — this is what keeps the tab label and the Info panel
-    /// following a `cd`.
+    /// Process metadata is a fallback until a shell reports OSC 7. It keeps
+    /// ordinary local shells useful without integration; once OSC arrives it
+    /// wins, since only the shell can report an SSH session's remote path.
     private var directoryTimer: Timer?
     private var lastReportedDirectory: String?
+    private var usesOSCWorkingDirectory = false
 
     /// Shared across every pane: one device and one shader library is enough,
     /// and a per-pane device would duplicate the glyph atlas too.
@@ -95,6 +97,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         markedTextField.drawsBackground = true
         markedTextField.lineBreakMode = .byClipping
         addSubview(markedTextField)
+        addSubview(progressBar)
         AlacrittyRegistry.shared.register(self, for: token)
         for name in [
             NSApplication.didBecomeActiveNotification,
@@ -213,7 +216,8 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
 
     private func updateDirectoryPolling() {
         let shouldPoll =
-            isSurfaceVisible && NSApp.isActive && window?.isKeyWindow == true
+            !usesOSCWorkingDirectory
+            && isSurfaceVisible && NSApp.isActive && window?.isKeyWindow == true
         guard shouldPoll else {
             directoryTimer?.invalidate()
             directoryTimer = nil
@@ -231,7 +235,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     }
 
     private func reportWorkingDirectory() {
-        guard let handle else { return }
+        guard !usesOSCWorkingDirectory, let handle else { return }
         // The foreground job's directory, falling back to the shell's — a
         // long-running command should not blank the label.
         let pid = kero_alacritty_foreground_pid(handle)
@@ -318,6 +322,15 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     }
 
     // MARK: - Geometry
+
+    override func layout() {
+        super.layout()
+        let height: CGFloat = 2
+        progressBar.frame = CGRect(
+            x: 0, y: bounds.height - height,
+            width: bounds.width, height: height
+        )
+    }
 
     private func gridSize(for size: CGSize) -> (columns: Int, rows: Int) {
         let usableWidth = size.width - Self.padding.x * 2
@@ -658,7 +671,9 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
            kind == KERO_EVENT_TITLE
             || kind == KERO_EVENT_BELL
             || kind == KERO_EVENT_EXIT
-            || kind == KERO_EVENT_CLIPBOARD_LOAD {
+            || kind == KERO_EVENT_CLIPBOARD_LOAD
+            || kind == KERO_EVENT_WORKING_DIRECTORY
+            || kind == KERO_EVENT_NOTIFICATION {
             if pendingEvents.count < 64 {
                 pendingEvents.append((kind, payload))
             }
@@ -706,8 +721,38 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
                     )
                 }
             )
+        case KERO_EVENT_WORKING_DIRECTORY:
+            let path = String(decoding: payload, as: UTF8.self)
+            guard !path.isEmpty else { return }
+            usesOSCWorkingDirectory = true
+            directoryTimer?.invalidate()
+            directoryTimer = nil
+            guard path != lastReportedDirectory else { return }
+            lastReportedDirectory = path
+            events?.terminalDidChangeWorkingDirectory(path)
+        case KERO_EVENT_PROGRESS:
+            guard payload.count == 3,
+                  let state = Self.progressState(rawValue: payload[0])
+            else { return }
+            let percent = payload[2] == 0 ? nil : Int(payload[1])
+            progressBar.applyReport(state: state, percent: percent)
+        case KERO_EVENT_NOTIFICATION:
+            let message = String(decoding: payload, as: UTF8.self)
+            guard !message.isEmpty else { return }
+            events?.terminalDidRequestDesktopNotification(title: "", body: message)
         default:
             break
+        }
+    }
+
+    private static func progressState(rawValue: UInt8) -> TerminalProgressState? {
+        switch rawValue {
+        case 0: .remove
+        case 1: .set
+        case 2: .error
+        case 3: .indeterminate
+        case 4: .pause
+        default: nil
         }
     }
 

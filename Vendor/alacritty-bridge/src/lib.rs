@@ -13,8 +13,11 @@
 //! The snapshot buffer is owned by the handle and is only valid until the next
 //! call on that handle.
 
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::ffi::{c_char, c_void, CStr};
+use std::fs::File;
+use std::io::{self, Read};
 use std::os::fd::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -30,8 +33,9 @@ use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::search::{RegexIter, RegexSearch};
 use alacritty_terminal::term::{Config, Osc52, Term, TermDamage, TermMode};
-use alacritty_terminal::tty;
+use alacritty_terminal::tty::{self, EventedPty, EventedReadWrite};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, CursorStyle, NamedColor, Rgb};
+use polling::{Event as PollingEvent, PollMode, Poller};
 
 // MARK: - C types
 
@@ -43,6 +47,9 @@ pub const KERO_EVENT_BELL: u32 = 2;
 pub const KERO_EVENT_EXIT: u32 = 3;
 pub const KERO_EVENT_CLIPBOARD_STORE: u32 = 4;
 pub const KERO_EVENT_CLIPBOARD_LOAD: u32 = 5;
+pub const KERO_EVENT_WORKING_DIRECTORY: u32 = 6;
+pub const KERO_EVENT_PROGRESS: u32 = 7;
+pub const KERO_EVENT_NOTIFICATION: u32 = 8;
 
 /// Per-cell attributes handed to the renderer. A subset of
 /// `alacritty_terminal`'s `Flags` plus Kero's own `SELECTED`.
@@ -143,6 +150,223 @@ pub struct KeroConfig {
     pub scrollback_lines: usize,
 }
 
+// MARK: - OSC interception
+
+/// `alacritty_terminal` handles OSC sequences that mutate its grid, but does
+/// not expose host events for working directories or OSC 9. Termy solves this
+/// at the PTY boundary; Kero uses the same seam so the emulator still receives
+/// every sequence it understands while app integrations are lifted out first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OscEvent {
+    WorkingDirectory(String),
+    Progress { state: u8, percent: Option<u8> },
+    Notification(String),
+}
+
+#[derive(Debug, Default)]
+struct OscInterceptor {
+    state: OscParseState,
+    buffer: Vec<u8>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum OscParseState {
+    #[default]
+    Ground,
+    Escape,
+    Start,
+    Payload,
+    PayloadEscape,
+}
+
+/// Terminal output is untrusted and an unterminated OSC must not grow forever.
+const MAX_OSC_BYTES: usize = 64 * 1024;
+
+impl OscInterceptor {
+    fn process<'a>(&mut self, input: &'a [u8]) -> (Cow<'a, [u8]>, Vec<OscEvent>) {
+        if self.state == OscParseState::Ground
+            && input.last() != Some(&0x1b)
+            && !input.windows(2).any(|pair| pair == b"\x1b]")
+        {
+            return (Cow::Borrowed(input), Vec::new());
+        }
+
+        let mut output = Vec::with_capacity(input.len());
+        let mut events = Vec::new();
+
+        for &byte in input {
+            match self.state {
+                OscParseState::Ground => {
+                    if byte == 0x1b {
+                        self.state = OscParseState::Escape;
+                    } else {
+                        output.push(byte);
+                    }
+                }
+                OscParseState::Escape => {
+                    if byte == b']' {
+                        self.buffer.clear();
+                        self.state = OscParseState::Start;
+                    } else {
+                        output.extend_from_slice(&[0x1b, byte]);
+                        self.state = OscParseState::Ground;
+                    }
+                }
+                OscParseState::Start => {
+                    self.buffer.push(byte);
+                    self.state = OscParseState::Payload;
+                }
+                OscParseState::Payload => {
+                    if byte == 0x07 {
+                        self.finish(&mut output, &mut events);
+                    } else if byte == 0x1b {
+                        self.state = OscParseState::PayloadEscape;
+                    } else if self.buffer.len() < MAX_OSC_BYTES {
+                        self.buffer.push(byte);
+                    } else {
+                        self.emit_passthrough(&mut output);
+                        self.reset();
+                    }
+                }
+                OscParseState::PayloadEscape => {
+                    if byte == b'\\' {
+                        self.finish(&mut output, &mut events);
+                    } else if self.buffer.len() + 2 <= MAX_OSC_BYTES {
+                        self.buffer.extend_from_slice(&[0x1b, byte]);
+                        self.state = OscParseState::Payload;
+                    } else {
+                        self.emit_passthrough(&mut output);
+                        self.reset();
+                    }
+                }
+            }
+        }
+
+        (Cow::Owned(output), events)
+    }
+
+    fn finish(&mut self, output: &mut Vec<u8>, events: &mut Vec<OscEvent>) {
+        if let Some(event) = self.parse_payload() {
+            events.push(event);
+        } else if !self.should_consume_payload() {
+            // Alacritty still needs titles, colors, OSC 8 links, OSC 52, and
+            // every other sequence it already implements.
+            self.emit_passthrough(output);
+        }
+        self.reset();
+    }
+
+    fn reset(&mut self) {
+        self.buffer.clear();
+        self.state = OscParseState::Ground;
+    }
+
+    /// BEL and ST are equivalent OSC terminators. Normalizing passthrough to
+    /// BEL avoids retaining another bit of parser state.
+    fn emit_passthrough(&self, output: &mut Vec<u8>) {
+        output.extend_from_slice(b"\x1b]");
+        output.extend_from_slice(&self.buffer);
+        output.push(0x07);
+    }
+
+    fn should_consume_payload(&self) -> bool {
+        std::str::from_utf8(&self.buffer)
+            .is_ok_and(|payload| payload.starts_with("7;") || payload.starts_with("9;"))
+    }
+
+    fn parse_payload(&self) -> Option<OscEvent> {
+        let payload = std::str::from_utf8(&self.buffer).ok()?;
+
+        if let Some(url) = payload.strip_prefix("7;") {
+            return working_directory_from_osc7(url).map(OscEvent::WorkingDirectory);
+        }
+
+        let rest = payload.strip_prefix("9;")?;
+        if let Some(progress) = rest.strip_prefix("4;") {
+            return parse_progress(progress);
+        }
+        if let Some(path) = rest.strip_prefix("9;") {
+            return clean_terminal_text(path.trim().trim_matches('"'), 4096)
+                .map(OscEvent::WorkingDirectory);
+        }
+
+        clean_terminal_text(rest, 4096).map(OscEvent::Notification)
+    }
+}
+
+fn working_directory_from_osc7(value: &str) -> Option<String> {
+    let path = if let Some(rest) = value.strip_prefix("file://") {
+        let slash = rest.find('/')?;
+        &rest[slash..]
+    } else {
+        value
+    };
+    let decoded = percent_decode(path);
+    clean_terminal_text(&decoded, 4096)
+}
+
+fn parse_progress(value: &str) -> Option<OscEvent> {
+    let mut parts = value.split(';');
+    let state = parts.next()?.parse::<u8>().ok()?;
+    if state > 4 {
+        return None;
+    }
+    let percent = parts
+        .next()
+        .and_then(|value| value.parse::<u8>().ok())
+        .map(|value| value.min(100));
+    Some(OscEvent::Progress { state, percent })
+}
+
+fn clean_terminal_text(value: &str, max_bytes: usize) -> Option<String> {
+    if value.is_empty() || value.chars().any(|character| character.is_control()) {
+        return None;
+    }
+    let end = value
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= max_bytes)
+        .last()
+        .unwrap_or(0);
+    let end = if value.len() <= max_bytes {
+        value.len()
+    } else if end == 0 {
+        return None;
+    } else {
+        end
+    };
+    Some(value[..end].to_owned())
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let (Some(high), Some(low)) =
+                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+            {
+                decoded.push((high << 4) | low);
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 // MARK: - Event proxy
 
 /// Swift's view pointer, carried to the PTY thread. Kero keeps the surface
@@ -185,6 +409,138 @@ impl Proxy {
         if let Some(sender) = self.sender.get() {
             let _ = sender.send(Msg::Input(text.into_bytes().into()));
         }
+    }
+
+    fn emit_osc(&self, event: OscEvent) {
+        match event {
+            OscEvent::WorkingDirectory(path) => {
+                self.emit(KERO_EVENT_WORKING_DIRECTORY, path.as_bytes())
+            }
+            OscEvent::Progress { state, percent } => self.emit(
+                KERO_EVENT_PROGRESS,
+                &[state, percent.unwrap_or(0), u8::from(percent.is_some())],
+            ),
+            OscEvent::Notification(message) => {
+                self.emit(KERO_EVENT_NOTIFICATION, message.as_bytes())
+            }
+        }
+    }
+}
+
+/// Reader installed in front of Alacritty's stock event loop. Most reads take
+/// the borrowed fast path and return directly from the caller's buffer.
+struct OscReader {
+    inner: File,
+    interceptor: OscInterceptor,
+    pending: VecDeque<u8>,
+    proxy: Proxy,
+}
+
+impl Read for OscReader {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        if output.is_empty() {
+            return Ok(0);
+        }
+        if !self.pending.is_empty() {
+            return Ok(drain_bytes(&mut self.pending, output));
+        }
+
+        let count = self.inner.read(output)?;
+        if count == 0 {
+            return Ok(0);
+        }
+
+        let (filtered, events) = self.interceptor.process(&output[..count]);
+        for event in events {
+            self.proxy.emit_osc(event);
+        }
+
+        match filtered {
+            Cow::Borrowed(_) => Ok(count),
+            Cow::Owned(bytes) => {
+                let written = bytes.len().min(output.len());
+                output[..written].copy_from_slice(&bytes[..written]);
+                self.pending.extend(bytes[written..].iter().copied());
+                Ok(written)
+            }
+        }
+    }
+}
+
+fn drain_bytes(bytes: &mut VecDeque<u8>, output: &mut [u8]) -> usize {
+    let count = bytes.len().min(output.len());
+    for target in &mut output[..count] {
+        *target = bytes.pop_front().expect("count is bounded by queue length");
+    }
+    count
+}
+
+/// Delegates polling, writes, resizes, and child-exit handling to Alacritty's
+/// PTY while substituting the OSC-aware reader above.
+struct OscPty {
+    inner: tty::Pty,
+    reader: OscReader,
+}
+
+impl OscPty {
+    fn new(inner: tty::Pty, proxy: Proxy) -> io::Result<Self> {
+        let reader = inner.file().try_clone()?;
+        Ok(Self {
+            inner,
+            reader: OscReader {
+                inner: reader,
+                interceptor: OscInterceptor::default(),
+                pending: VecDeque::new(),
+                proxy,
+            },
+        })
+    }
+}
+
+impl EventedReadWrite for OscPty {
+    type Reader = OscReader;
+    type Writer = File;
+
+    unsafe fn register(
+        &mut self,
+        poller: &Arc<Poller>,
+        interest: PollingEvent,
+        mode: PollMode,
+    ) -> io::Result<()> {
+        unsafe { self.inner.register(poller, interest, mode) }
+    }
+
+    fn reregister(
+        &mut self,
+        poller: &Arc<Poller>,
+        interest: PollingEvent,
+        mode: PollMode,
+    ) -> io::Result<()> {
+        self.inner.reregister(poller, interest, mode)
+    }
+
+    fn deregister(&mut self, poller: &Arc<Poller>) -> io::Result<()> {
+        self.inner.deregister(poller)
+    }
+
+    fn reader(&mut self) -> &mut Self::Reader {
+        &mut self.reader
+    }
+
+    fn writer(&mut self) -> &mut Self::Writer {
+        self.inner.writer()
+    }
+}
+
+impl EventedPty for OscPty {
+    fn next_child_event(&mut self) -> Option<tty::ChildEvent> {
+        self.inner.next_child_event()
+    }
+}
+
+impl OnResize for OscPty {
+    fn on_resize(&mut self, window_size: WindowSize) {
+        self.inner.on_resize(window_size);
     }
 }
 
@@ -418,6 +774,10 @@ pub unsafe extern "C" fn kero_alacritty_new(
     let child_pid = pty.child().id() as i32;
     let master_fd = pty.file().as_raw_fd();
 
+    let pty = match OscPty::new(pty, proxy.clone()) {
+        Ok(pty) => pty,
+        Err(_) => return std::ptr::null_mut(),
+    };
     let event_loop = match EventLoop::new(term.clone(), proxy.clone(), pty, false, false) {
         Ok(event_loop) => event_loop,
         Err(_) => return std::ptr::null_mut(),
@@ -1139,6 +1499,11 @@ mod tests {
     use alacritty_terminal::event::VoidListener;
     use alacritty_terminal::vte::ansi::Processor;
 
+    fn intercept(interceptor: &mut OscInterceptor, input: &[u8]) -> (Vec<u8>, Vec<OscEvent>) {
+        let (output, events) = interceptor.process(input);
+        (output.into_owned(), events)
+    }
+
     fn theme() -> KeroTheme {
         let mut palette = [0; 256];
         for (index, color) in palette.iter_mut().enumerate() {
@@ -1183,6 +1548,73 @@ mod tests {
         assert!(text.contains("\x1b]8;;https://kero.sh\x1b\\"));
         assert!(text.contains("Kero"));
         assert!(text.contains("\x1b]8;;\x1b\\"));
+    }
+
+    #[test]
+    fn osc_interceptor_extracts_working_directory_progress_and_notification() {
+        let mut interceptor = OscInterceptor::default();
+        let input = concat!(
+            "before",
+            "\x1b]7;file://host/Users/egoist/My%20Project\x07",
+            "\x1b]9;4;1;150\x1b\\",
+            "\x1b]9;Build complete\x07",
+            "after"
+        );
+        let (output, events) = intercept(&mut interceptor, input.as_bytes());
+
+        assert_eq!(output, b"beforeafter");
+        assert_eq!(
+            events,
+            vec![
+                OscEvent::WorkingDirectory("/Users/egoist/My Project".to_owned()),
+                OscEvent::Progress {
+                    state: 1,
+                    percent: Some(100),
+                },
+                OscEvent::Notification("Build complete".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn osc_interceptor_preserves_sequences_owned_by_alacritty() {
+        let mut interceptor = OscInterceptor::default();
+        let input = b"\x1b]8;;https://kero.sh\x1b\\Kero\x1b]8;;\x1b\\";
+        let (output, events) = intercept(&mut interceptor, input);
+
+        assert_eq!(output, b"\x1b]8;;https://kero.sh\x07Kero\x1b]8;;\x07");
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn osc_interceptor_handles_every_chunk_boundary() {
+        let input = b"left\x1b]7;file://host/tmp/project\x1b\\right";
+        let expected = (
+            b"leftright".to_vec(),
+            vec![OscEvent::WorkingDirectory("/tmp/project".to_owned())],
+        );
+
+        for split in 0..=input.len() {
+            let mut interceptor = OscInterceptor::default();
+            let (first_output, mut events) = intercept(&mut interceptor, &input[..split]);
+            let (second_output, second_events) = intercept(&mut interceptor, &input[split..]);
+            let mut output = first_output;
+            output.extend(second_output);
+            events.extend(second_events);
+            assert_eq!((output, events), expected, "split at {split}");
+        }
+    }
+
+    #[test]
+    fn osc_interceptor_rejects_control_characters_in_host_events() {
+        let mut interceptor = OscInterceptor::default();
+        let (output, events) = intercept(
+            &mut interceptor,
+            b"\x1b]7;file://host/tmp/project\nspoof\x07\x1b]9;bad\nmessage\x07",
+        );
+
+        assert!(output.is_empty());
+        assert!(events.is_empty());
     }
 }
 
