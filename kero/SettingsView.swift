@@ -306,7 +306,10 @@ private struct TerminalBackendOption: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Color.accentColor, lineWidth: isSelected ? 2 : 0)
+                    .strokeBorder(
+                        isSelected ? Color.accentColor : Color.primary.opacity(0.12),
+                        lineWidth: isSelected ? 2 : 0.5
+                    )
             )
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
