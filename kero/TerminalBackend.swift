@@ -33,6 +33,13 @@ enum TerminalBackend: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    var settingsIconName: String {
+        switch self {
+        case .libghostty: "TerminalBackendGhostty"
+        case .alacritty: "TerminalBackendAlacritty"
+        }
+    }
+
     /// Whether ``makeSurface(launch:)`` returns a surface. Settings offers only
     /// available backends and ``init(persisted:)`` refuses the rest, so a
     /// hand-edited config can never leave a window full of dead panes.
@@ -64,7 +71,7 @@ enum TerminalBackend: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .libghostty:
             [
-                .init(title: "Broad compatibility", isPositive: true),
+                .init(title: "Excellent performance", isPositive: true),
                 .init(title: "Terminal graphics", isPositive: true),
                 .init(title: "Kitty keyboard", isPositive: true),
             ]

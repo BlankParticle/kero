@@ -96,27 +96,32 @@ struct SettingsView: View {
             }
 
             Section("Terminal") {
-                // Only show this once there is a real choice. `selectable`
-                // omits backends this build cannot create, so every tab here
-                // takes effect instead of silently producing a dead pane.
-                if TerminalBackend.selectable.count > 1 {
-                    HStack(alignment: .top) {
-                        Text("Backend")
-                        Spacer()
-                        TerminalBackendPicker(selection: $settings.terminalBackend)
+                VStack(alignment: .leading, spacing: 12) {
+                    // Only show this once there is a real choice. `selectable`
+                    // omits backends this build cannot create, so every tab
+                    // here takes effect instead of silently producing a dead
+                    // pane.
+                    if TerminalBackend.selectable.count > 1 {
+                        HStack(alignment: .top) {
+                            Text("Backend")
+                            Spacer()
+                            VStack(alignment: .leading, spacing: 8) {
+                                TerminalBackendPicker(selection: $settings.terminalBackend)
+                                Text("Changes apply to new terminals.")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
-                    Text("Changes apply to new terminals.")
+
+                    Toggle(
+                        "Restore session history on relaunch",
+                        isOn: $settings.restoreTerminalHistory
+                    )
+                    Text("Reopened terminals show their previous scrollback above a fresh shell.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-
-                Toggle(
-                    "Restore session history on relaunch",
-                    isOn: $settings.restoreTerminalHistory
-                )
-                Text("Reopened terminals show their previous scrollback above a fresh shell.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
             }
 
             Section("Text Editing") {
@@ -279,10 +284,16 @@ private struct TerminalBackendOption: View {
     var body: some View {
         Button(action: select) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(backend.displayName)
-                    .font(.callout)
-                    .fontWeight(isSelected ? .semibold : .regular)
-                    .foregroundStyle(.primary)
+                HStack(spacing: 6) {
+                    Image(backend.settingsIconName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 24, height: 24)
+                    Text(backend.displayName)
+                        .font(.callout)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                        .foregroundStyle(.primary)
+                }
                 Text(backend.settingsDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -303,10 +314,7 @@ private struct TerminalBackendOption: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(
-                        isSelected ? Color.accentColor : Color.primary.opacity(0.12),
-                        lineWidth: isSelected ? 2 : 0.5
-                    )
+                    .strokeBorder(Color.accentColor, lineWidth: isSelected ? 2 : 0)
             )
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
