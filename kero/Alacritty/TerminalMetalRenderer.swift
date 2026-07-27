@@ -231,7 +231,12 @@ final class TerminalMetalRenderer {
 
         instances.reserveCapacity(rowInstances.reduce(0) { $0 + $1.count } + 1)
         for row in rowInstances { instances.append(contentsOf: row) }
-        appendCursor(snapshot: snapshot, metrics: metrics, padding: padding)
+        appendCursor(
+            snapshot: snapshot,
+            metrics: metrics,
+            padding: padding,
+            blockInsertionIndex: blockCursorInsertionIndex(snapshot: snapshot)
+        )
     }
 
     private func buildRow(
@@ -364,11 +369,13 @@ final class TerminalMetalRenderer {
         return instances
     }
 
-    /// Drawn before the glyph pass in z-order terms — a block cursor is a
-    /// filled quad and the glyph on top is recoloured to the cell background,
-    /// so the character stays legible.
+    /// Places a block cursor after its row backgrounds but before its glyphs,
+    /// while outline cursors sit above all cell content.
     private func appendCursor(
-        snapshot: KeroSnapshot, metrics: AlacrittyMetrics, padding: CGPoint
+        snapshot: KeroSnapshot,
+        metrics: AlacrittyMetrics,
+        padding: CGPoint,
+        blockInsertionIndex: Int?
     ) {
         guard snapshot.cursor_line >= 0, snapshot.cursor_column >= 0 else { return }
         let cellWidth = Float(metrics.cellWidth)
@@ -379,7 +386,7 @@ final class TerminalMetalRenderer {
 
         if snapshot.cursor_shape == 3 {
             // Hollow cursor is four narrow quads.
-            instances.insert(contentsOf: [
+            instances.append(contentsOf: [
                 Instance(
                     origin: SIMD2(left, top), size: SIMD2(cellWidth, 1),
                     color: color, uvOrigin: .zero, uvSize: .zero, kind: 0
@@ -396,7 +403,7 @@ final class TerminalMetalRenderer {
                     origin: SIMD2(left + cellWidth - 1, top), size: SIMD2(1, cellHeight),
                     color: color, uvOrigin: .zero, uvSize: .zero, kind: 0
                 ),
-            ], at: 0)
+            ])
             return
         }
 
@@ -405,14 +412,49 @@ final class TerminalMetalRenderer {
         case 2: (SIMD2(left, top), SIMD2(2, cellHeight))
         default: (SIMD2(left, top), SIMD2(cellWidth, cellHeight))
         }
-        // Inserted at the front so the block cursor sits under its glyph.
-        instances.insert(
-            Instance(
-                origin: origin, size: size, color: color,
-                uvOrigin: .zero, uvSize: .zero, kind: 0
-            ),
-            at: 0
+        let cursor = Instance(
+            origin: origin, size: size, color: color,
+            uvOrigin: .zero, uvSize: .zero, kind: 0
         )
+        if snapshot.cursor_shape == 0, let blockInsertionIndex {
+            instances.insert(cursor, at: blockInsertionIndex)
+        } else {
+            instances.append(cursor)
+        }
+    }
+
+    /// Row instances are backgrounds followed by glyphs and decorations. Find
+    /// the boundary for the cursor row so a styled background cannot cover the
+    /// block cursor, while its recoloured glyph still renders above the fill.
+    private func blockCursorInsertionIndex(snapshot: KeroSnapshot) -> Int? {
+        guard let cells = snapshot.cells else { return nil }
+        let row = snapshot.cursor_line
+        let column = snapshot.cursor_column
+        guard row >= 0, row < snapshot.rows,
+              column >= 0, column < snapshot.columns
+        else { return nil }
+
+        var insertionIndex = rowInstances[..<row].reduce(0) { $0 + $1.count }
+        var currentColumn = 0
+        while currentColumn < snapshot.columns {
+            let background = AlacrittyRenderer.background(
+                of: cells[row * snapshot.columns + currentColumn],
+                default: snapshot.background
+            )
+            var span = 1
+            while currentColumn + span < snapshot.columns {
+                let next = cells[row * snapshot.columns + currentColumn + span]
+                guard AlacrittyRenderer.background(
+                    of: next, default: snapshot.background
+                ) == background else { break }
+                span += 1
+            }
+            if background != snapshot.background {
+                insertionIndex += 1
+            }
+            currentColumn += span
+        }
+        return insertionIndex
     }
 
     private static func color(_ packed: UInt32) -> SIMD4<Float> {

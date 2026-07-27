@@ -99,6 +99,12 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         addSubview(markedTextField)
         addSubview(progressBar)
         AlacrittyRegistry.shared.register(self, for: token)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationWillResignActive(_:)),
+            name: NSApplication.willResignActiveNotification,
+            object: nil
+        )
         for name in [
             NSApplication.didBecomeActiveNotification,
             NSApplication.didResignActiveNotification,
@@ -198,8 +204,23 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     /// Kero windows, but release the CAMetalLayer drawable pool and renderer.
     /// A CAMetal drawable is IOSurface-backed, and CALayer can display that
     /// same surface directly without copying it through the CPU.
-    private func freezeVisibleFrame() {
+    private func freezeVisibleFrame(cursorHasFocus: Bool? = nil) {
         guard isSurfaceVisible, layer is CAMetalLayer else { return }
+        let cursorWasVisible = !cursorBlinking || cursorVisible
+        // The last active frame may be the hidden half of a cursor blink.
+        // Present the steady inactive cursor before retaining that drawable.
+        cursorTimer?.invalidate()
+        cursorTimer = nil
+        cursorVisible = true
+        needsUnconditionalRedraw = true
+        let renderedInactive = renderFrame(
+            waitUntilCompleted: true,
+            cursorHasFocus: cursorHasFocus
+        )
+        cursorTimer?.invalidate()
+        cursorTimer = nil
+        cursorVisible = true
+
         presentationCoverLayer.removeFromSuperlayer()
         let frozenLayer = CALayer()
         frozenLayer.isOpaque = true
@@ -210,8 +231,55 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             ?? 2
         frozenLayer.contentsGravity = .topLeft
         frozenLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        if !renderedInactive, !cursorWasVisible {
+            addInactiveCursorOverlay(to: frozenLayer)
+        }
         metalRenderer = nil
         replaceBackingLayer(with: frozenLayer)
+    }
+
+    /// AppKit can revoke CAMetalLayer drawables before focus-loss callbacks
+    /// finish. If the retained frame caught the hidden blink phase, draw the
+    /// steady cursor as ordinary layers over that frozen IOSurface.
+    private func addInactiveCursorOverlay(to frozenLayer: CALayer) {
+        guard let handle else { return }
+        var snapshot = KeroSnapshot()
+        kero_alacritty_snapshot(handle, &snapshot)
+        guard snapshot.cursor_line >= 0, snapshot.cursor_column >= 0 else { return }
+
+        let cell = CGRect(
+            x: Self.padding.x + CGFloat(snapshot.cursor_column) * metrics.cellWidth,
+            y: bounds.maxY - Self.padding.y
+                - CGFloat(snapshot.cursor_line + 1) * metrics.cellHeight,
+            width: metrics.cellWidth,
+            height: metrics.cellHeight
+        )
+        let frames: [CGRect] = switch snapshot.cursor_shape {
+        case 1:
+            [CGRect(x: 0, y: 0, width: cell.width, height: 2)]
+        case 2:
+            [CGRect(x: 0, y: 0, width: 2, height: cell.height)]
+        default:
+            [
+                CGRect(x: 0, y: 0, width: cell.width, height: 1),
+                CGRect(x: 0, y: cell.height - 1, width: cell.width, height: 1),
+                CGRect(x: 0, y: 0, width: 1, height: cell.height),
+                CGRect(x: cell.width - 1, y: 0, width: 1, height: cell.height),
+            ]
+        }
+
+        let overlay = CALayer()
+        overlay.frame = cell
+        overlay.contentsScale = frozenLayer.contentsScale
+        let color = AlacrittyRenderer.color(snapshot.cursor_color)
+        for frame in frames {
+            let segment = CALayer()
+            segment.frame = frame
+            segment.backgroundColor = color
+            segment.contentsScale = frozenLayer.contentsScale
+            overlay.addSublayer(segment)
+        }
+        frozenLayer.addSublayer(overlay)
     }
 
     private func updateDirectoryPolling() {
@@ -442,8 +510,16 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     }
 
     @discardableResult
-    private func renderFrame(waitUntilCompleted: Bool = false) -> Bool {
+    private func renderFrame(
+        waitUntilCompleted: Bool = false,
+        cursorHasFocus: Bool? = nil
+    ) -> Bool {
         guard let handle, let metalLayer = layer as? CAMetalLayer else { return false }
+        // Full-screen TUIs use DEC mode 2026 to replace a frame atomically.
+        // A host cursor tick must not expose the cleared intermediate grid.
+        if !waitUntilCompleted, kero_alacritty_synchronized_update(handle) {
+            return true
+        }
         if metalRenderer == nil, let metalDevice {
             metalRenderer = TerminalMetalRenderer(device: metalDevice)
         }
@@ -492,7 +568,9 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         if cursorBlinking, !cursorVisible {
             snapshot.cursor_line = -1
             snapshot.cursor_column = -1
-        } else if !hasEffectiveTerminalFocus, snapshot.cursor_shape == 0 {
+        } else if !(cursorHasFocus ?? hasEffectiveTerminalFocus),
+            snapshot.cursor_shape == 0
+        {
             snapshot.cursor_shape = 3
         }
         let generation = presentationGeneration
@@ -635,9 +713,11 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
 
     private func resetCursorBlink() {
         guard cursorBlinking else { return }
+        cursorTimer?.invalidate()
+        cursorTimer = nil
         cursorVisible = true
-        cursorBlinking = false
-        updateCursorBlinking(true)
+        updateCursorTimer()
+        scheduleRender(force: true)
     }
 
     /// Feeds Kero's overlay scrollbar.
@@ -687,7 +767,8 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         switch kind {
         case KERO_EVENT_WAKEUP:
             updateFocusReport()
-            resetCursorBlink()
+            // Output must not restart the host cursor timer. Animated TUIs can
+            // wake the PTY many times per second even while the user is idle.
             if isSurfaceVisible {
                 scheduleRender()
                 reportScroll()
@@ -913,6 +994,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         bytes.withUnsafeBufferPointer { pointer in
             kero_alacritty_write(handle, pointer.baseAddress, pointer.count)
         }
+        resetCursorBlink()
     }
 
     private func writeControl(_ bytes: [UInt8]) {
@@ -941,12 +1023,18 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     }
 
     override func resignFirstResponder() -> Bool {
-        scheduleRender(force: true)
-        DispatchQueue.main.async { [weak self] in
-            self?.updateActiveTimers()
-            self?.updateFocusReport()
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.updateActiveTimers()
+                self.updateFocusReport()
+                if self.isSurfaceVisible {
+                    self.scheduleRender(force: true)
+                }
+            }
         }
-        return super.resignFirstResponder()
+        return resigned
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -961,12 +1049,24 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         }
     }
 
+    @objc private func applicationWillResignActive(_ notification: Notification) {
+        // Once the app is inactive, CAMetalLayer may stop vending drawables.
+        // Capture the steady inactive cursor while the active drawable pool is
+        // still available, then keep that IOSurface behind the other app.
+        freezeVisibleFrame(cursorHasFocus: false)
+    }
+
     @objc private func effectiveFocusChanged(_ notification: Notification) {
-        updateBackingLayerActivity()
-        updateActiveTimers()
-        updateFocusReport()
-        if shouldKeepMetalLayerActive {
-            scheduleRender(force: true)
+        // App/window notifications can arrive before AppKit's active and key
+        // flags have settled. Render from the final focus state next turn.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateActiveTimers()
+            self.updateFocusReport()
+            self.updateBackingLayerActivity()
+            if self.shouldKeepMetalLayerActive {
+                self.scheduleRender(force: true)
+            }
         }
     }
 
@@ -1011,7 +1111,6 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         }
         if let bytes = AlacrittyKeyMap.bytes(for: event, mode: terminalMode) {
             write(bytes)
-            resetCursorBlink()
             return
         }
         // Anything left is either IME composition or a key Kero's menus own;

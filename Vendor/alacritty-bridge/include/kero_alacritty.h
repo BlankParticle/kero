@@ -210,6 +210,9 @@ typedef struct {
 /// snapshot, and rebuild only the rows it names.
 void kero_alacritty_take_damage(KeroTerminal *handle, KeroDamage *out);
 
+/// Whether a DEC synchronized update is still being buffered.
+bool kero_alacritty_synchronized_update(KeroTerminal *handle);
+
 /// Fills `out` with the visible grid.
 void kero_alacritty_snapshot(KeroTerminal *handle, KeroSnapshot *out);
 

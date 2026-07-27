@@ -21,6 +21,7 @@ use std::io::{self, Read};
 use std::os::fd::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event, EventListener, Notify, OnResize, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg, Notifier};
@@ -306,6 +307,100 @@ impl OscInterceptor {
     }
 }
 
+// MARK: - Synchronized update tracking
+
+/// Tracks DEC private mode 2026 at the PTY boundary. Alacritty buffers the
+/// enclosed bytes atomically, but Kero's host-driven cursor timer can otherwise
+/// request a frame while that buffer is still being assembled.
+#[derive(Debug, Default)]
+struct SyncUpdateTracker {
+    state: SyncScanState,
+    parameters: Vec<u8>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum SyncScanState {
+    #[default]
+    Ground,
+    Escape,
+    Csi,
+    ControlString,
+    ControlStringEscape,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncUpdateEvent {
+    Start,
+    End,
+}
+
+const SYNCHRONIZED_UPDATE_TIMEOUT: Duration = Duration::from_millis(150);
+
+impl SyncUpdateTracker {
+    fn process(&mut self, input: &[u8]) -> Vec<SyncUpdateEvent> {
+        let mut events = Vec::new();
+
+        for &byte in input {
+            match self.state {
+                SyncScanState::Ground => match byte {
+                    0x1b => self.state = SyncScanState::Escape,
+                    0x9b => self.start_csi(),
+                    0x90 | 0x98 | 0x9d | 0x9e | 0x9f => self.state = SyncScanState::ControlString,
+                    _ => {}
+                },
+                SyncScanState::Escape => match byte {
+                    b'[' => self.start_csi(),
+                    b']' | b'P' | b'X' | b'^' | b'_' => self.state = SyncScanState::ControlString,
+                    0x1b => {}
+                    _ => self.state = SyncScanState::Ground,
+                },
+                SyncScanState::Csi => match byte {
+                    0x1b => {
+                        self.parameters.clear();
+                        self.state = SyncScanState::Escape;
+                    }
+                    0x40..=0x7e => {
+                        if self.parameters == b"?2026" {
+                            match byte {
+                                b'h' => events.push(SyncUpdateEvent::Start),
+                                b'l' => events.push(SyncUpdateEvent::End),
+                                _ => {}
+                            }
+                        }
+                        self.parameters.clear();
+                        self.state = SyncScanState::Ground;
+                    }
+                    0x20..=0x3f if self.parameters.len() < 32 => {
+                        self.parameters.push(byte);
+                    }
+                    0x18 | 0x1a => {
+                        self.parameters.clear();
+                        self.state = SyncScanState::Ground;
+                    }
+                    _ => {}
+                },
+                SyncScanState::ControlString => match byte {
+                    0x07 | 0x9c => self.state = SyncScanState::Ground,
+                    0x1b => self.state = SyncScanState::ControlStringEscape,
+                    _ => {}
+                },
+                SyncScanState::ControlStringEscape => match byte {
+                    b'\\' | 0x9c => self.state = SyncScanState::Ground,
+                    0x1b => {}
+                    _ => self.state = SyncScanState::ControlString,
+                },
+            }
+        }
+
+        events
+    }
+
+    fn start_csi(&mut self) {
+        self.parameters.clear();
+        self.state = SyncScanState::Csi;
+    }
+}
+
 fn working_directory_from_osc7(value: &str) -> Option<String> {
     let path = if let Some(rest) = value.strip_prefix("file://") {
         let slash = rest.find('/')?;
@@ -414,6 +509,9 @@ unsafe impl Sync for SwiftContext {}
 struct Shared {
     theme: KeroTheme,
     window_size: WindowSize,
+    synchronized_update: bool,
+    synchronized_update_ending: bool,
+    synchronized_update_deadline: Option<Instant>,
     /// OSC 52 read formatters waiting for Kero's confirmation sheet. Keeping
     /// the formatter here preserves whether the request used BEL or ST.
     pending_clipboard: VecDeque<(u64, Arc<dyn Fn(&str) -> String + Sync + Send + 'static>)>,
@@ -439,6 +537,37 @@ impl Proxy {
     fn write_pty(&self, text: String) {
         if let Some(sender) = self.sender.get() {
             let _ = sender.send(Msg::Input(text.into_bytes().into()));
+        }
+    }
+
+    fn record_synchronized_update(&self, event: SyncUpdateEvent) {
+        let mut shared = self.shared.lock();
+        match event {
+            SyncUpdateEvent::Start => {
+                shared.synchronized_update = true;
+                shared.synchronized_update_ending = false;
+                shared.synchronized_update_deadline =
+                    Some(Instant::now() + SYNCHRONIZED_UPDATE_TIMEOUT);
+            }
+            SyncUpdateEvent::End if shared.synchronized_update => {
+                // The reader sees ESU before Alacritty has parsed the bytes.
+                // Keep suppression active until its Wakeup confirms the
+                // buffered frame has been committed.
+                shared.synchronized_update_ending = true;
+            }
+            SyncUpdateEvent::End => {}
+        }
+    }
+
+    fn finish_synchronized_update_if_ready(&self) {
+        let mut shared = self.shared.lock();
+        let timed_out = shared
+            .synchronized_update_deadline
+            .is_some_and(|deadline| deadline <= Instant::now());
+        if shared.synchronized_update && (shared.synchronized_update_ending || timed_out) {
+            shared.synchronized_update = false;
+            shared.synchronized_update_ending = false;
+            shared.synchronized_update_deadline = None;
         }
     }
 
@@ -470,6 +599,7 @@ impl Proxy {
 struct OscReader {
     inner: File,
     interceptor: OscInterceptor,
+    sync_tracker: SyncUpdateTracker,
     pending: VecDeque<u8>,
     proxy: Proxy,
 }
@@ -486,6 +616,10 @@ impl Read for OscReader {
         let count = self.inner.read(output)?;
         if count == 0 {
             return Ok(0);
+        }
+
+        for event in self.sync_tracker.process(&output[..count]) {
+            self.proxy.record_synchronized_update(event);
         }
 
         let (filtered, events) = self.interceptor.process(&output[..count]);
@@ -528,6 +662,7 @@ impl OscPty {
             reader: OscReader {
                 inner: reader,
                 interceptor: OscInterceptor::default(),
+                sync_tracker: SyncUpdateTracker::default(),
                 pending: VecDeque::new(),
                 proxy,
             },
@@ -585,7 +720,10 @@ impl OnResize for OscPty {
 impl EventListener for Proxy {
     fn send_event(&self, event: Event) {
         match event {
-            Event::Wakeup => self.emit(KERO_EVENT_WAKEUP, &[]),
+            Event::Wakeup => {
+                self.finish_synchronized_update_if_ready();
+                self.emit(KERO_EVENT_WAKEUP, &[]);
+            }
             Event::Bell => self.emit(KERO_EVENT_BELL, &[]),
             Event::Title(title) => self.emit(KERO_EVENT_TITLE, title.as_bytes()),
             // Kero derives the tab title from the shell and directory, so a
@@ -777,6 +915,9 @@ pub unsafe extern "C" fn kero_alacritty_new(
     let shared = Arc::new(FairMutex::new(Shared {
         theme: *theme,
         window_size,
+        synchronized_update: false,
+        synchronized_update_ending: false,
+        synchronized_update_deadline: None,
         pending_clipboard: VecDeque::new(),
         next_clipboard_id: 1,
     }));
@@ -1531,6 +1672,18 @@ pub unsafe extern "C" fn kero_alacritty_clear(handle: *mut KeroTerminal) {
     term.grid_mut().clear_history();
 }
 
+/// Whether Alacritty is buffering a DEC synchronized update.
+///
+/// # Safety
+/// `handle` must be live.
+#[no_mangle]
+pub unsafe extern "C" fn kero_alacritty_synchronized_update(handle: *mut KeroTerminal) -> bool {
+    if handle.is_null() {
+        return false;
+    }
+    (*handle).shared.lock().synchronized_update
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1540,6 +1693,36 @@ mod tests {
     fn intercept(interceptor: &mut OscInterceptor, input: &[u8]) -> (Vec<u8>, Vec<OscEvent>) {
         let (output, events) = interceptor.process(input);
         (output.into_owned(), events)
+    }
+
+    #[test]
+    fn sync_update_tracker_handles_every_chunk_boundary() {
+        let input = b"\x1b[?2026hframe\x1b[?2026l";
+        let expected = vec![SyncUpdateEvent::Start, SyncUpdateEvent::End];
+
+        for split in 0..=input.len() {
+            let mut tracker = SyncUpdateTracker::default();
+            let mut events = tracker.process(&input[..split]);
+            events.extend(tracker.process(&input[split..]));
+            assert_eq!(events, expected, "split at {split}");
+        }
+    }
+
+    #[test]
+    fn sync_update_tracker_ignores_sequences_inside_control_strings() {
+        let mut tracker = SyncUpdateTracker::default();
+        let events = tracker.process(b"\x1b]0;\x1b[?2026h\x07\x1bPpayload\x1b[?2026l\x1b\\");
+
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn sync_update_tracker_accepts_c1_csi() {
+        let mut tracker = SyncUpdateTracker::default();
+        assert_eq!(
+            tracker.process(b"\x9b?2026h\x9b?2026l"),
+            vec![SyncUpdateEvent::Start, SyncUpdateEvent::End]
+        );
     }
 
     fn theme() -> KeroTheme {

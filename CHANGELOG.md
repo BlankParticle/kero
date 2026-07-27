@@ -10,6 +10,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 `## [<version>]` section at the top for each release, matching the version you
 set in the Xcode project.
 
+Write release notes for the final product users receive, not the development
+history. When a feature is still unreleased, fold its fixes and refinements into
+the original feature bullet instead of adding separate entries for them.
+
 ## [unrelease]
 
 - Choose which terminal emulator drives new panes in Settings → Terminal → Backend. Ghostty remains the default, while the new Alacritty backend supports Kero’s fonts, shared color themes, color emoji, selection, scrollback, find, clipboard protections, mouse-aware TUIs, styled session restore, and OSC 7, 8, 9, and 133 integrations. The Colors pickers now offer up to 30 popular themes per appearance, shared by both engines; terminal graphics and Kitty keyboard input remain unsupported in Alacritty.
