@@ -62,53 +62,83 @@ enum Theme {
         named: defaultLightThemeName, from: "GitHub Light Default", dark: false
     )
 
-    /// Popular themes present in both Ghostty's bundled catalog and the
-    /// official `alacritty/alacritty-theme` collection. Keep this list compact:
-    /// with Kero's two defaults, Settings exposes at most 30 themes.
-    /// A few equivalent themes use different catalog names (for example
-    /// Atom One Dark / one_dark); those aliases are included after comparing
-    /// their definitions.
-    private nonisolated static let commonCatalogThemeNames: Set<String> = [
+    /// Popular themes that render through the shared palette path used by both
+    /// terminal backends. Each appearance has 29 catalog themes plus Kero's
+    /// default, keeping either Settings picker capped at 30 choices.
+    private nonisolated static let commonDarkCatalogThemeNames: Set<String> = [
+        "Adwaita Dark",
+        "Afterglow",
         "Atom One Dark",
-        "Atom One Light",
         "Ayu",
-        "Ayu Light",
         "Ayu Mirage",
-        "Catppuccin Latte",
+        "Catppuccin Frappe",
         "Catppuccin Macchiato",
         "Catppuccin Mocha",
         "Dark+",
         "Dracula",
         "Everforest Dark Hard",
-        "Flexoki Light",
+        "Flexoki Dark",
         "GitHub Dark",
+        "GitHub Dark Dimmed",
         "Gruvbox Dark",
-        "Gruvbox Light",
+        "Gruvbox Material",
         "iTerm2 Solarized Dark",
-        "iTerm2 Solarized Light",
+        "Kanagawa Dragon",
         "Kanagawa Wave",
-        "Material",
+        "Material Dark",
         "Monokai Pro",
         "Night Owl",
         "Nord",
+        "Nvim Dark",
         "Rose Pine",
-        "Rose Pine Dawn",
         "Rose Pine Moon",
         "TokyoNight",
-        "TokyoNight Day",
         "TokyoNight Storm",
+        "Vesper",
+    ]
+
+    private nonisolated static let commonLightCatalogThemeNames: Set<String> = [
+        "Adwaita",
+        "Alabaster",
+        "Apple System Colors Light",
+        "Atom One Light",
+        "Ayu Light",
+        "Bluloco Light",
+        "Catppuccin Latte",
+        "Dawnfox",
+        "Dayfox",
+        "Everforest Light Med",
+        "Flexoki Light",
+        "GitHub",
+        "GitHub Light High Contrast",
+        "GitLab Light",
+        "Gruvbox Light",
+        "Gruvbox Material Light",
+        "Iceberg Light",
+        "iTerm2 Solarized Light",
+        "Kanagawa Lotus",
+        "Light Owl",
+        "Material",
+        "Modus Operandi",
+        "Monokai Pro Light",
+        "Nord Light",
+        "Nvim Light",
+        "One Half Light",
+        "Rose Pine Dawn",
+        "TokyoNight Day",
+        "Tomorrow",
     ]
 
     /// Kero's Default comes first; the duplicate GitHub Default catalog rows
     /// are intentionally omitted because the built-ins use those palettes.
     nonisolated static let commonDarkThemes: [GhosttyThemeDefinition] =
         [defaultDarkDefinition] + GhosttyThemeCatalog.allThemes.filter {
-            $0.isDark && commonCatalogThemeNames.contains($0.name)
+            $0.isDark && commonDarkCatalogThemeNames.contains($0.name)
         }
 
     nonisolated static let commonLightThemes: [GhosttyThemeDefinition] =
         [defaultLightDefinition] + GhosttyThemeCatalog.allThemes.filter {
-            !$0.isDark && commonCatalogThemeNames.contains($0.name)
+            !$0.isDark && commonLightCatalogThemeNames.contains($0.name)
         }
 
     nonisolated static func isCommonTheme(named name: String, dark: Bool) -> Bool {
