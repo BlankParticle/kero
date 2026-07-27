@@ -71,20 +71,19 @@ enum TerminalBackend: String, CaseIterable, Identifiable, Sendable {
                 .init(title: "Excellent performance", isPositive: true),
                 .init(title: "GPU-accelerated", isPositive: true),
                 .init(title: "Lower memory footprint", isPositive: true),
-                .init(title: "Terminal graphics", isPositive: false),
+                .init(title: "Kitty terminal graphics", isPositive: true),
             ]
         }
     }
 
-    /// What the shell reports as `TERM_PROGRAM`, and the version beside it —
-    /// empty while a backend has no release to name. Many terminal tools read
-    /// this as a capability hint (terminal-image-cli picks the Kitty graphics
-    /// protocol off `ghostty`), so it names the emulator actually driving the
-    /// pane rather than Kero.
+    /// What the shell reports as `TERM_PROGRAM`, and the version beside it.
+    /// Tools treat this as a capability identity: Ghostty reports its embedded
+    /// version, while the Alacritty backend advertises Kitty compatibility now
+    /// that Kero implements the Kitty graphics protocol.
     var termProgram: (name: String, version: String) {
         switch self {
         case .libghostty: ("ghostty", "1.3.2-dev")
-        case .alacritty: ("alacritty", "0.26.0")
+        case .alacritty: ("kitty", "")
         }
     }
 

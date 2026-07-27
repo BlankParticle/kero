@@ -13,6 +13,10 @@
 //! The snapshot buffer is owned by the handle and is only valid until the next
 //! call on that handle.
 
+mod graphics_event_loop;
+mod kitty_graphics;
+mod kitty_graphics_tracking;
+
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::ffi::{c_char, c_void, CStr};
@@ -24,7 +28,6 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event, EventListener, Notify, OnResize, WindowSize};
-use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg, Notifier};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::Direction;
 use alacritty_terminal::index::{Column, Line, Point, Side};
@@ -37,6 +40,11 @@ use alacritty_terminal::term::{Config, Osc52, Term, TermDamage, TermMode};
 use alacritty_terminal::tty::{self, EventedPty, EventedReadWrite};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, CursorStyle, NamedColor, Rgb};
 use polling::{Event as PollingEvent, PollMode, Poller};
+
+use graphics_event_loop::{
+    GraphicsEventLoop, GraphicsEventLoopSender, GraphicsMsg, GraphicsNotifier,
+};
+use kitty_graphics::{KittyGraphicsScreen, KittyGraphicsSize, KittyGraphicsStore};
 
 // MARK: - C types
 
@@ -136,6 +144,40 @@ pub struct KeroSnapshot {
     pub display_offset: usize,
     pub total_lines: usize,
     pub screen_lines: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KeroKittyPlacement {
+    pub placement_serial: u64,
+    pub image_id: u32,
+    pub placement_id: u32,
+    /// PNG bytes retained by the terminal handle until its next FFI call.
+    pub png: *const u8,
+    pub png_len: usize,
+    pub image_width: u32,
+    pub image_height: u32,
+    pub image_generation: u64,
+    pub viewport_row: i32,
+    pub column: usize,
+    pub source_x: u32,
+    pub source_y: u32,
+    pub source_width: u32,
+    pub source_height: u32,
+    pub display_columns: u32,
+    pub display_rows: u32,
+    pub occupied_columns: u32,
+    pub occupied_rows: u32,
+    pub x_offset: u32,
+    pub y_offset: u32,
+    pub z_index: i32,
+}
+
+#[repr(C)]
+pub struct KeroKittySnapshot {
+    pub revision: u64,
+    pub placements: *const KeroKittyPlacement,
+    pub placements_len: usize,
 }
 
 #[repr(C)]
@@ -525,7 +567,7 @@ struct Proxy {
     /// Filled once the event loop exists. Replies that the terminal generates
     /// on its own (DSR, color and size queries) are written straight back here
     /// instead of crossing into Swift and back.
-    sender: Arc<OnceLock<EventLoopSender>>,
+    sender: Arc<OnceLock<GraphicsEventLoopSender>>,
     shared: Arc<FairMutex<Shared>>,
 }
 
@@ -536,7 +578,7 @@ impl Proxy {
 
     fn write_pty(&self, text: String) {
         if let Some(sender) = self.sender.get() {
-            let _ = sender.send(Msg::Input(text.into_bytes().into()));
+            let _ = sender.send(GraphicsMsg::Input(text.into_bytes().into()));
         }
     }
 
@@ -785,8 +827,10 @@ impl Dimensions for TermSize {
 
 pub struct KeroTerminal {
     term: Arc<FairMutex<Term<Proxy>>>,
-    notifier: Notifier,
+    notifier: GraphicsNotifier,
     shared: Arc<FairMutex<Shared>>,
+    kitty_graphics: Arc<FairMutex<KittyGraphicsStore>>,
+    kitty_graphics_size: Arc<FairMutex<KittyGraphicsSize>>,
     cells: Vec<KeroCell>,
     /// Variable-length UTF-8 cell contents for combining character clusters.
     cell_text: Vec<u8>,
@@ -800,6 +844,10 @@ pub struct KeroTerminal {
     match_index: usize,
     /// Reused per frame so damage reporting does not allocate.
     dirty_rows: Vec<usize>,
+    kitty_placements: Vec<KeroKittyPlacement>,
+    /// Retains each placement's PNG while C pointers are visible to Swift.
+    kitty_images: Vec<Arc<[u8]>>,
+    last_kitty_damage_revision: u64,
     /// Set once the shell has exited, so teardown does not wait on a loop that
     /// has already stopped.
     exited: bool,
@@ -945,6 +993,13 @@ pub unsafe extern "C" fn kero_alacritty_new(
         screen_lines,
     };
     let term = Arc::new(FairMutex::new(Term::new(term_config, &size, proxy.clone())));
+    let kitty_graphics = Arc::new(FairMutex::new(KittyGraphicsStore::default()));
+    let kitty_graphics_size = Arc::new(FairMutex::new(KittyGraphicsSize {
+        columns,
+        rows: screen_lines,
+        cell_width: f32::from(config.cell_width.max(1)),
+        cell_height: f32::from(config.cell_height.max(1)),
+    }));
 
     let pty = match tty::new(&options, window_size, 0) {
         Ok(pty) => pty,
@@ -957,7 +1012,13 @@ pub unsafe extern "C" fn kero_alacritty_new(
         Ok(pty) => pty,
         Err(_) => return std::ptr::null_mut(),
     };
-    let event_loop = match EventLoop::new(term.clone(), proxy.clone(), pty, false, false) {
+    let event_loop = match GraphicsEventLoop::new(
+        term.clone(),
+        proxy.clone(),
+        pty,
+        kitty_graphics.clone(),
+        kitty_graphics_size.clone(),
+    ) {
         Ok(event_loop) => event_loop,
         Err(_) => return std::ptr::null_mut(),
     };
@@ -968,8 +1029,10 @@ pub unsafe extern "C" fn kero_alacritty_new(
 
     Box::into_raw(Box::new(KeroTerminal {
         term,
-        notifier: Notifier(sender),
+        notifier: GraphicsNotifier(sender),
         shared,
+        kitty_graphics,
+        kitty_graphics_size,
         cells: Vec::new(),
         cell_text: Vec::new(),
         child_pid,
@@ -977,6 +1040,9 @@ pub unsafe extern "C" fn kero_alacritty_new(
         matches: Vec::new(),
         match_index: 0,
         dirty_rows: Vec::new(),
+        kitty_placements: Vec::new(),
+        kitty_images: Vec::new(),
+        last_kitty_damage_revision: 0,
         exited: false,
     }))
 }
@@ -991,7 +1057,7 @@ pub unsafe extern "C" fn kero_alacritty_free(handle: *mut KeroTerminal) {
         return;
     }
     let terminal = Box::from_raw(handle);
-    let _ = terminal.notifier.0.send(Msg::Shutdown);
+    let _ = terminal.notifier.0.send(GraphicsMsg::Shutdown);
 }
 
 /// PID of the shell, for Kero's process panel and its teardown signals.
@@ -1134,6 +1200,12 @@ pub unsafe extern "C" fn kero_alacritty_resize(
         cell_height: cell_height.max(1),
     };
     terminal.shared.lock().window_size = window_size;
+    *terminal.kitty_graphics_size.lock() = KittyGraphicsSize {
+        columns: columns.max(1) as usize,
+        rows: rows.max(1) as usize,
+        cell_width: f32::from(cell_width.max(1)),
+        cell_height: f32::from(cell_height.max(1)),
+    };
 
     let size = TermSize {
         columns: columns.max(1) as usize,
@@ -1670,6 +1742,12 @@ pub unsafe extern "C" fn kero_alacritty_clear(handle: *mut KeroTerminal) {
     let mut term = (*handle).term.lock();
     term.grid_mut().clear_viewport();
     term.grid_mut().clear_history();
+    let mut graphics = (*handle).kitty_graphics.lock();
+    let primary = graphics.state.clear_screen(KittyGraphicsScreen::Primary);
+    let alternate = graphics.state.clear_screen(KittyGraphicsScreen::Alternate);
+    if primary || alternate {
+        graphics.mark_changed();
+    }
 }
 
 /// Whether Alacritty is buffering a DEC synchronized update.
@@ -1895,7 +1973,7 @@ pub unsafe extern "C" fn kero_alacritty_take_damage(
     terminal.dirty_rows.clear();
 
     let mut term = terminal.term.lock();
-    let kind = match term.damage() {
+    let mut kind = match term.damage() {
         TermDamage::Full => KERO_DAMAGE_FULL,
         TermDamage::Partial(iter) => {
             for bounds in iter {
@@ -1910,6 +1988,12 @@ pub unsafe extern "C" fn kero_alacritty_take_damage(
     };
     term.reset_damage();
     drop(term);
+    let graphics_revision = terminal.kitty_graphics.lock().revision;
+    if graphics_revision != terminal.last_kitty_damage_revision {
+        terminal.last_kitty_damage_revision = graphics_revision;
+        kind = KERO_DAMAGE_FULL;
+        terminal.dirty_rows.clear();
+    }
 
     *out = KeroDamage {
         kind,
@@ -2072,6 +2156,89 @@ pub unsafe extern "C" fn kero_alacritty_snapshot(
         display_offset: content.display_offset,
         total_lines: term.total_lines(),
         screen_lines,
+    };
+}
+
+/// Fills `out` with visible Kitty image placements. PNG pointers belong to the
+/// handle and remain valid until its next FFI call.
+///
+/// # Safety
+/// `handle` must be live and `out` must be a valid `KeroKittySnapshot`.
+#[no_mangle]
+pub unsafe extern "C" fn kero_alacritty_kitty_snapshot(
+    handle: *mut KeroTerminal,
+    out: *mut KeroKittySnapshot,
+) {
+    if handle.is_null() || out.is_null() {
+        return;
+    }
+    let terminal = &mut *handle;
+    let (history_size, display_offset, rows, columns, screen) = {
+        let term = terminal.term.lock();
+        (
+            term.grid().history_size(),
+            term.grid().display_offset(),
+            term.grid().screen_lines(),
+            term.grid().columns(),
+            KittyGraphicsScreen::from_alternate_screen(term.mode().contains(TermMode::ALT_SCREEN)),
+        )
+    };
+    let (revision, mut placements) = {
+        let graphics = terminal.kitty_graphics.lock();
+        (
+            graphics.revision,
+            graphics
+                .state
+                .render_placements(history_size, display_offset, rows, columns, screen),
+        )
+    };
+    placements.sort_by(|left, right| {
+        left.z_index
+            .cmp(&right.z_index)
+            .then(left.image_id.cmp(&right.image_id))
+            .then(left.placement_id.cmp(&right.placement_id))
+            .then(left.placement_serial.cmp(&right.placement_serial))
+    });
+
+    terminal.kitty_placements.clear();
+    terminal.kitty_images.clear();
+    terminal.kitty_placements.reserve(placements.len());
+    terminal.kitty_images.reserve(placements.len());
+    for placement in placements {
+        terminal.kitty_images.push(placement.png);
+        let png = terminal
+            .kitty_images
+            .last()
+            .expect("image was retained for the placement");
+        terminal.kitty_placements.push(KeroKittyPlacement {
+            placement_serial: placement.placement_serial,
+            image_id: placement.image_id,
+            placement_id: placement.placement_id,
+            png: png.as_ptr(),
+            png_len: png.len(),
+            image_width: placement.image_width,
+            image_height: placement.image_height,
+            image_generation: placement.image_generation,
+            viewport_row: placement.viewport_row,
+            column: placement.column,
+            source_x: placement.source_x,
+            source_y: placement.source_y,
+            source_width: placement.source_width,
+            source_height: placement.source_height,
+            display_columns: placement.display_columns,
+            display_rows: placement.display_rows,
+            occupied_columns: placement.occupied_columns,
+            occupied_rows: placement.occupied_rows,
+            x_offset: placement.x_offset,
+            y_offset: placement.y_offset,
+            z_index: placement.z_index,
+        });
+    }
+
+    *out = KeroKittySnapshot {
+        revision,
+        placements: terminal.kitty_placements.as_ptr(),
+        placements_len: terminal.kitty_placements.len(),
     };
 }
 

@@ -81,6 +81,8 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
     /// selection drag, focus — since those move pixels without touching a cell.
     private var needsUnconditionalRedraw = true
     private var metalRenderer: TerminalMetalRenderer?
+    private var kittyPlacements: [AlacrittyKittyPlacement] = []
+    private var kittyImageData: [AlacrittyKittyImageKey: Data] = [:]
 
     override init(frame frameRect: NSRect) {
         metrics = AlacrittyMetrics(
@@ -583,6 +585,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
 
         var snapshot = KeroSnapshot()
         kero_alacritty_snapshot(handle, &snapshot)
+        updateKittyGraphics(handle: handle)
         updateMarkedTextOverlay(snapshot: snapshot)
         updateCursorBlinking(snapshot.cursor_blinking)
         if cursorBlinking, !cursorVisible {
@@ -616,6 +619,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         }
         let submitted = renderer.render(
             snapshot: snapshot,
+            kittyPlacements: kittyPlacements,
             metrics: metrics,
             padding: Self.padding,
             scale: scale,
@@ -636,6 +640,40 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         }
         AlacrittyRenderStats.shared.rebuilt(rows: dirtyRows?.count ?? snapshot.rows)
         return submitted
+    }
+
+    private func updateKittyGraphics(handle: OpaquePointer) {
+        var snapshot = KeroKittySnapshot()
+        kero_alacritty_kitty_snapshot(handle, &snapshot)
+        guard snapshot.placements_len > 0, let placements = snapshot.placements else {
+            kittyPlacements = []
+            kittyImageData = [:]
+            return
+        }
+
+        let buffer = UnsafeBufferPointer(
+            start: placements,
+            count: Int(snapshot.placements_len)
+        )
+        var activeImageKeys = Set<AlacrittyKittyImageKey>()
+        kittyPlacements = buffer.compactMap { placement in
+            let key = AlacrittyKittyImageKey(
+                imageID: placement.image_id,
+                generation: placement.image_generation
+            )
+            activeImageKeys.insert(key)
+            let png: Data
+            if let cached = kittyImageData[key] {
+                png = cached
+            } else if placement.png_len > 0, let bytes = placement.png {
+                png = Data(bytes: bytes, count: Int(placement.png_len))
+                kittyImageData[key] = png
+            } else {
+                return nil
+            }
+            return AlacrittyKittyPlacement(placement, png: png)
+        }
+        kittyImageData = kittyImageData.filter { activeImageKeys.contains($0.key) }
     }
 
     private func didPresentFrame(
@@ -1419,7 +1457,10 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         focusForInteraction()
         let text = urls.map { AlacrittyTerminalView.shellToken(for: $0.path) }
             .joined(separator: " ")
-        sendText(text + " ")
+        // A drop is semantically a paste, not simulated typing. Image-aware
+        // TUIs such as Grok only inspect dropped paths when bracketed paste
+        // identifies the complete payload as one event.
+        write(AlacrittyKeyMap.paste(text + " ", mode: terminalMode))
         return true
     }
 

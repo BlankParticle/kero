@@ -5,6 +5,7 @@
 
 import AppKit
 import Metal
+import MetalKit
 import QuartzCore
 import simd
 
@@ -28,7 +29,8 @@ final class TerminalMetalRenderer {
         var color: SIMD4<Float>
         var uvOrigin: SIMD2<Float>
         var uvSize: SIMD2<Float>
-        /// 0 solid, 1 foreground-tinted glyph, 2 intrinsic-color glyph.
+        /// 0 solid, 1 foreground-tinted glyph, 2 intrinsic-color glyph,
+        /// 3 Kitty graphics texture.
         var kind: UInt32
         var padding: UInt32 = 0
     }
@@ -37,7 +39,9 @@ final class TerminalMetalRenderer {
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let sampler: MTLSamplerState
+    private let textureLoader: MTKTextureLoader
     private var atlas: TerminalGlyphAtlas?
+    private var kittyTextures: [AlacrittyKittyImageKey: MTLTexture] = [:]
 
     private var instances: [Instance] = []
     private var instanceBuffer: MTLBuffer?
@@ -57,6 +61,7 @@ final class TerminalMetalRenderer {
         guard let queue = device.makeCommandQueue() else { return nil }
         self.device = device
         self.queue = queue
+        textureLoader = MTKTextureLoader(device: device)
 
         guard let library = try? device.makeLibrary(source: Self.shaderSource, options: nil),
               let vertexFunction = library.makeFunction(name: "kero_terminal_vertex"),
@@ -101,6 +106,7 @@ final class TerminalMetalRenderer {
     @discardableResult
     func render(
         snapshot: KeroSnapshot,
+        kittyPlacements: [AlacrittyKittyPlacement],
         metrics: AlacrittyMetrics,
         padding: CGPoint,
         scale: CGFloat,
@@ -151,6 +157,13 @@ final class TerminalMetalRenderer {
               let encoder = commands.makeRenderCommandEncoder(descriptor: pass)
         else { return false }
 
+        drawKittyGraphics(
+            kittyPlacements.filter { $0.zIndex < 0 },
+            metrics: metrics,
+            padding: padding,
+            viewportSize: viewportSize,
+            with: encoder
+        )
         if !instances.isEmpty, let buffer = uploadInstances() {
             var viewport = SIMD2<Float>(Float(viewportSize.width), Float(viewportSize.height))
             encoder.setRenderPipelineState(pipeline)
@@ -165,6 +178,15 @@ final class TerminalMetalRenderer {
                 instanceCount: instances.count
             )
         }
+        drawKittyGraphics(
+            kittyPlacements.filter { $0.zIndex >= 0 },
+            metrics: metrics,
+            padding: padding,
+            viewportSize: viewportSize,
+            with: encoder
+        )
+        let activeImageKeys = Set(kittyPlacements.map(\.imageKey))
+        kittyTextures = kittyTextures.filter { activeImageKeys.contains($0.key) }
 
         encoder.endEncoding()
         if let onPresented {
@@ -177,6 +199,88 @@ final class TerminalMetalRenderer {
             return commands.status != .error
         }
         return true
+    }
+
+    private func drawKittyGraphics(
+        _ placements: [AlacrittyKittyPlacement],
+        metrics: AlacrittyMetrics,
+        padding: CGPoint,
+        viewportSize: CGSize,
+        with encoder: MTLRenderCommandEncoder
+    ) {
+        guard !placements.isEmpty else { return }
+        var viewport = SIMD2<Float>(Float(viewportSize.width), Float(viewportSize.height))
+        encoder.setRenderPipelineState(pipeline)
+        encoder.setVertexBytes(
+            &viewport,
+            length: MemoryLayout<SIMD2<Float>>.stride,
+            index: 1
+        )
+        encoder.setFragmentSamplerState(sampler, index: 0)
+
+        for placement in placements {
+            guard placement.imageWidth > 0,
+                  placement.imageHeight > 0,
+                  placement.sourceWidth > 0,
+                  placement.sourceHeight > 0,
+                  placement.displayColumns > 0,
+                  placement.displayRows > 0,
+                  let texture = kittyTexture(for: placement)
+            else { continue }
+
+            let destinationWidth = Float(placement.displayColumns) * Float(metrics.cellWidth)
+            let destinationHeight = Float(placement.displayRows) * Float(metrics.cellHeight)
+            var instance = Instance(
+                origin: SIMD2(
+                    Float(padding.x)
+                        + Float(placement.column) * Float(metrics.cellWidth)
+                        + Float(placement.xOffset),
+                    Float(padding.y)
+                        + Float(placement.viewportRow) * Float(metrics.cellHeight)
+                        + Float(placement.yOffset)
+                ),
+                size: SIMD2(destinationWidth, destinationHeight),
+                color: SIMD4(repeating: 1),
+                uvOrigin: SIMD2(
+                    Float(placement.sourceX) / Float(placement.imageWidth),
+                    Float(placement.sourceY) / Float(placement.imageHeight)
+                ),
+                uvSize: SIMD2(
+                    Float(placement.sourceWidth) / Float(placement.imageWidth),
+                    Float(placement.sourceHeight) / Float(placement.imageHeight)
+                ),
+                kind: 3
+            )
+            encoder.setVertexBytes(
+                &instance,
+                length: MemoryLayout<Instance>.stride,
+                index: 0
+            )
+            encoder.setFragmentTexture(texture, index: 0)
+            encoder.drawPrimitives(
+                type: .triangle,
+                vertexStart: 0,
+                vertexCount: 6,
+                instanceCount: 1
+            )
+        }
+    }
+
+    private func kittyTexture(for placement: AlacrittyKittyPlacement) -> MTLTexture? {
+        if let texture = kittyTextures[placement.imageKey] {
+            return texture
+        }
+        guard let texture = try? textureLoader.newTexture(
+            data: placement.png,
+            options: [
+                .origin: MTKTextureLoader.Origin.topLeft,
+                .SRGB: false,
+            ]
+        ) else {
+            return nil
+        }
+        kittyTextures[placement.imageKey] = texture
+        return texture
     }
 
     private func uploadInstances() -> MTLBuffer? {
@@ -530,6 +634,9 @@ final class TerminalMetalRenderer {
             return in.color;
         }
         float4 sample = atlas.sample(atlasSampler, in.uv);
+        if (in.kind == 3) {
+            return sample;
+        }
         if (in.kind == 2) {
             // CGContext stores premultiplied pixels. The pipeline uses
             // straight-alpha blending, so undo that multiplication here.

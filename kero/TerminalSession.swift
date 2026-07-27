@@ -324,15 +324,17 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
             let path = shellQuote(replayFileURL.path)
             commands.append("if [ -r \(path) ]; then /bin/cat \(path); /bin/rm -f \(path); fi")
         }
-        // Many terminal tools use TERM_PROGRAM as a capability hint, so it
-        // names the emulator actually driving the pane — tools such as
-        // terminal-image-cli select the Kitty graphics protocol off it.
+        // Many terminal tools use TERM_PROGRAM as a capability hint. Each
+        // backend advertises a compatible identity so tools select protocols
+        // that Kero can actually render.
         let termProgram = backend.termProgram
         commands.append("export TERM_PROGRAM=\(shellQuote(termProgram.name))")
         if !termProgram.version.isEmpty {
             commands.append(
                 "export TERM_PROGRAM_VERSION=\(shellQuote(termProgram.version))"
             )
+        } else {
+            commands.append("unset TERM_PROGRAM_VERSION")
         }
         commands.append("exec \(shellQuote(shellPath)) -l")
         // Ghostty's macOS launcher prepends `exec -l` to a shell command.

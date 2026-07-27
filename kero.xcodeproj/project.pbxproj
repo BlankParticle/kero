@@ -160,6 +160,9 @@
 			inputPaths = (
 				"$(SRCROOT)/Vendor/alacritty-bridge/Cargo.lock",
 				"$(SRCROOT)/Vendor/alacritty-bridge/Cargo.toml",
+				"$(SRCROOT)/Vendor/alacritty-bridge/src/graphics_event_loop.rs",
+				"$(SRCROOT)/Vendor/alacritty-bridge/src/kitty_graphics.rs",
+				"$(SRCROOT)/Vendor/alacritty-bridge/src/kitty_graphics_tracking.rs",
 				"$(SRCROOT)/Vendor/alacritty-bridge/src/lib.rs",
 				"$(SRCROOT)/scripts/build-alacritty-bridge.sh",
 			);

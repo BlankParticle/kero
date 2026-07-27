@@ -107,6 +107,37 @@ typedef struct {
 } KeroSnapshot;
 
 typedef struct {
+  uint64_t placement_serial;
+  uint32_t image_id;
+  uint32_t placement_id;
+  /// PNG bytes owned by the terminal handle and valid until its next FFI call.
+  const uint8_t *png;
+  size_t png_len;
+  uint32_t image_width;
+  uint32_t image_height;
+  uint64_t image_generation;
+  int32_t viewport_row;
+  size_t column;
+  uint32_t source_x;
+  uint32_t source_y;
+  uint32_t source_width;
+  uint32_t source_height;
+  uint32_t display_columns;
+  uint32_t display_rows;
+  uint32_t occupied_columns;
+  uint32_t occupied_rows;
+  uint32_t x_offset;
+  uint32_t y_offset;
+  int32_t z_index;
+} KeroKittyPlacement;
+
+typedef struct {
+  uint64_t revision;
+  const KeroKittyPlacement *placements;
+  size_t placements_len;
+} KeroKittySnapshot;
+
+typedef struct {
   const char *shell;
   const char *const *args;
   size_t args_len;
@@ -215,6 +246,9 @@ bool kero_alacritty_synchronized_update(KeroTerminal *handle);
 
 /// Fills `out` with the visible grid.
 void kero_alacritty_snapshot(KeroTerminal *handle, KeroSnapshot *out);
+
+/// Fills `out` with visible Kitty image placements.
+void kero_alacritty_kitty_snapshot(KeroTerminal *handle, KeroKittySnapshot *out);
 
 /// `KERO_MODE_*` bits.
 uint32_t kero_alacritty_mode(KeroTerminal *handle);
