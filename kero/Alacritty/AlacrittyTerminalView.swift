@@ -238,6 +238,19 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         replaceBackingLayer(with: frozenLayer)
     }
 
+    /// Re-renders the retained image while another Kero window, such as
+    /// Settings, owns key focus. A normal scheduled frame cannot update this
+    /// state because the inactive terminal is backed by a plain `CALayer`, not
+    /// a `CAMetalLayer`.
+    private func refreshFrozenFrame() {
+        guard isSurfaceVisible, NSApp.isActive, !(layer is CAMetalLayer) else {
+            scheduleRender(force: true)
+            return
+        }
+        replaceBackingLayer(with: makeBackingLayer())
+        freezeVisibleFrame(cursorHasFocus: false)
+    }
+
     /// AppKit can revoke CAMetalLayer drawables before focus-loss callbacks
     /// finish. If the retained frame caught the hidden blink phase, draw the
     /// steady cursor as ordinary layers over that frozen IOSurface.
@@ -380,7 +393,7 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         }
         // A new cell size means a different column count.
         synchronizeGridSize()
-        scheduleRender(force: true)
+        refreshFrozenFrame()
     }
 
     var foregroundPid: pid_t? {

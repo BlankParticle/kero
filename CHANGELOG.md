@@ -16,7 +16,7 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unrelease]
 
-- Choose which terminal emulator drives new panes in Settings → Terminal → Backend. Ghostty remains the default, while the new Alacritty backend supports Kero’s fonts, shared color themes, color emoji, selection, scrollback, find, clipboard protections, mouse-aware TUIs, styled session restore, and OSC 7, 8, 9, and 133 integrations. The Colors pickers now offer up to 30 popular themes per appearance, shared by both engines; terminal graphics and Kitty keyboard input remain unsupported in Alacritty.
+- Choose which terminal emulator drives new panes in Settings → Terminal → Backend. Ghostty remains the default, while the new Alacritty backend supports Kero’s fonts and optional font thickening with consistent weight in focused and inactive windows, shared color themes, color emoji, selection, scrollback, find, clipboard protections, mouse-aware TUIs, styled session restore, and OSC 7, 8, 9, and 133 integrations. “Thicken font strokes” now lives alongside the backend picker and applies live to both engines. The Colors pickers offer up to 30 popular themes per appearance, shared by both engines; terminal graphics and Kitty keyboard input remain unsupported in Alacritty.
 
 ## [0.1.26]
 

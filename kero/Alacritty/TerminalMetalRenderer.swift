@@ -73,7 +73,11 @@ final class TerminalMetalRenderer {
         attachment.rgbBlendOperation = .add
         attachment.alphaBlendOperation = .add
         attachment.sourceRGBBlendFactor = .sourceAlpha
-        attachment.sourceAlphaBlendFactor = .sourceAlpha
+        // The terminal framebuffer is always opaque. Preserve that alpha so
+        // the IOSurface retained for an inactive window composites exactly
+        // like the opaque CAMetalLayer; multiplying glyph coverage into alpha
+        // a second time makes antialiased edges look thinner after focus loss.
+        attachment.sourceAlphaBlendFactor = .one
         attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
         attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
 

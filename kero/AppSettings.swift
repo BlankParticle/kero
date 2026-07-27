@@ -67,8 +67,9 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
-    /// Ghostty's `font-thicken`: render glyphs with slightly heavier strokes,
-    /// like classic macOS font smoothing. Off by default so kero's text
+    /// Render terminal glyphs with slightly heavier strokes, like classic
+    /// macOS font smoothing. Each backend maps this to its own rasterizer.
+    /// Persisted as `terminal.font-thicken`; off by default so Kero's text
     /// matches a stock Ghostty install.
     @Published var fontThicken: Bool {
         didSet { save() }
@@ -112,7 +113,9 @@ final class AppSettings: nonisolated ObservableObject {
         fontFamily = toml["font-family"]?.string ?? ""
         let size = toml["font-size"]?.double ?? Self.defaultFontSize
         fontSize = Self.fontSizeRange.contains(size) ? size : Self.defaultFontSize
-        fontThicken = toml["font-thicken"]?.bool ?? false
+        fontThicken = toml["terminal.font-thicken"]?.bool
+            ?? toml["font-thicken"]?.bool
+            ?? false
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
         terminalBackend = TerminalBackend(persisted: toml["terminal.backend"]?.string)
@@ -180,7 +183,7 @@ final class AppSettings: nonisolated ObservableObject {
         }
         lines.append("font-size = \(TOML.number(fontSize))")
         if fontThicken {
-            lines.append("font-thicken = true")
+            lines.append("terminal.font-thicken = true")
         }
         if wrapLines {
             lines.append("editor.wrap-lines = true")

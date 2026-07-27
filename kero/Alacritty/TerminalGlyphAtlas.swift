@@ -178,7 +178,13 @@ final class TerminalGlyphAtlas {
 
         context.scaleBy(x: scale, y: scale)
         context.setShouldAntialias(true)
-        context.setAllowsFontSmoothing(true)
+        // The atlas stores grayscale coverage, not an opaque LCD surface.
+        // Core Graphics font smoothing strengthens that coverage even when
+        // `fontThicken` is off, making Alacritty's regular face look heavier
+        // than the same font in Ghostty. Keep normal antialiasing, and let the
+        // explicit stroke above be the only opt-in thickening pass.
+        context.setAllowsFontSmoothing(false)
+        context.setShouldSmoothFonts(false)
         // Draw relative to the glyph's own bounds so the bearing below is the
         // only thing that positions it in the cell.
         context.textPosition = CGPoint(x: -bounds.minX + padding, y: -bounds.minY + padding)
