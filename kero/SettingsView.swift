@@ -282,14 +282,20 @@ private struct TerminalBackendOption: View {
                 Text(backend.displayName)
                     .font(.callout)
                     .fontWeight(isSelected ? .semibold : .regular)
-                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .foregroundStyle(.primary)
                 Text(backend.settingsDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(backend.settingsHighlights) { highlight in
+                        TerminalBackendHighlightRow(highlight: highlight)
+                    }
+                }
+                .padding(.top, 2)
             }
-            .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
             .padding(8)
             .background(
                 RoundedRectangle(cornerRadius: 10)
@@ -308,6 +314,27 @@ private struct TerminalBackendOption: View {
         .accessibilityLabel(backend.displayName)
         .accessibilityHint(backend.settingsDescription)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+private struct TerminalBackendHighlightRow: View {
+    let highlight: TerminalBackendHighlight
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: highlight.isPositive
+                ? "checkmark.circle.fill"
+                : "xmark.circle.fill")
+                .foregroundStyle(highlight.isPositive ? Color.green : Color.red)
+            Text(highlight.title)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+        }
+        .font(.caption)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(highlight.isPositive ? "Available" : "Unavailable"): \(highlight.title)"
+        )
     }
 }
 

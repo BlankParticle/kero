@@ -53,9 +53,27 @@ enum TerminalBackend: String, CaseIterable, Identifiable, Sendable {
     var settingsDescription: String {
         switch self {
         case .libghostty:
-            "Default. Supports terminal graphics and Kitty keyboard input."
+            "Full-featured default."
         case .alacritty:
-            "Alternative renderer. Terminal graphics and Kitty keyboard input are unsupported."
+            "Performance-focused alternative."
+        }
+    }
+
+    /// Scannable strengths and limitations shown below the summary.
+    var settingsHighlights: [TerminalBackendHighlight] {
+        switch self {
+        case .libghostty:
+            [
+                .init(title: "Broad compatibility", isPositive: true),
+                .init(title: "Terminal graphics", isPositive: true),
+                .init(title: "Kitty keyboard", isPositive: true),
+            ]
+        case .alacritty:
+            [
+                .init(title: "Excellent performance", isPositive: true),
+                .init(title: "Terminal graphics", isPositive: false),
+                .init(title: "Kitty keyboard", isPositive: false),
+            ]
         }
     }
 
@@ -94,6 +112,13 @@ enum TerminalBackend: String, CaseIterable, Identifiable, Sendable {
             return AlacrittyTerminalView(launch: launch)
         }
     }
+}
+
+struct TerminalBackendHighlight: Identifiable, Sendable {
+    let title: String
+    let isPositive: Bool
+
+    var id: String { title }
 }
 
 /// Everything a backend needs to start one pane's shell. Kero resolves the
