@@ -63,6 +63,7 @@ enum TerminalBackend: String, CaseIterable, Identifiable, Sendable {
             [
                 .init(title: "Excellent performance", isPositive: true),
                 .init(title: "GPU-accelerated", isPositive: true),
+                .init(title: "Low memory footprint", isPositive: true),
                 .init(title: "Terminal graphics", isPositive: true),
                 .init(title: "Kitty keyboard", isPositive: true),
             ]
@@ -70,6 +71,7 @@ enum TerminalBackend: String, CaseIterable, Identifiable, Sendable {
             [
                 .init(title: "Excellent performance", isPositive: true),
                 .init(title: "GPU-accelerated", isPositive: true),
+                .init(title: "Lower memory footprint", isPositive: true),
                 .init(title: "Terminal graphics", isPositive: false),
                 .init(title: "Kitty keyboard", isPositive: false),
             ]

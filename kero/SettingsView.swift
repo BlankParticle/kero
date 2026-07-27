@@ -288,7 +288,6 @@ private struct TerminalBackendOption: View {
                         .frame(width: 24, height: 24)
                     Text(backend.displayName)
                         .font(.callout)
-                        .fontWeight(isSelected ? .semibold : .regular)
                         .foregroundStyle(.primary)
                 }
                 VStack(alignment: .leading, spacing: 3) {
