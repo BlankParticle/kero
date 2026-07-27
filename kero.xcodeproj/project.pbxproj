@@ -317,7 +317,6 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				EXECUTABLE_NAME = kero;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -332,6 +331,7 @@
 					"$(inherited)",
 					"$(BUILT_PRODUCTS_DIR)/alacritty-bridge",
 				);
+				KERO_DISPLAY_NAME = "Kero Debug";
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 0.1.28;
 				OTHER_LDFLAGS = (
@@ -339,7 +339,7 @@
 					"-lkero_alacritty",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = sh.kero.dev;
-				PRODUCT_NAME = "Kero Debug";
+				PRODUCT_NAME = kero;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -348,6 +348,7 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "kero/kero-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+				WRAPPER_NAME = "$(KERO_DISPLAY_NAME).app";
 			};
 			name = Debug;
 		};
@@ -363,7 +364,6 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				EXECUTABLE_NAME = kero;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -378,6 +378,7 @@
 					"$(inherited)",
 					"$(BUILT_PRODUCTS_DIR)/alacritty-bridge",
 				);
+				KERO_DISPLAY_NAME = Kero;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 0.1.28;
 				OTHER_LDFLAGS = (
@@ -385,7 +386,7 @@
 					"-lkero_alacritty",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = sh.kero;
-				PRODUCT_NAME = Kero;
+				PRODUCT_NAME = kero;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -394,6 +395,7 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "kero/kero-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+				WRAPPER_NAME = "$(KERO_DISPLAY_NAME).app";
 			};
 			name = Release;
 		};

@@ -622,14 +622,16 @@ private func run() throws {
 }
 
 enum KeroCommandLine {
-    /// Explicit arguments always mean CLI mode. With no arguments, the
-    /// per-process bridge variables distinguish `kero` inside a Kero terminal
-    /// from LaunchServices opening the app.
+    /// The per-process bridge variables identify invocations from a Kero
+    /// terminal. A `+` action is also CLI-shaped so `kero +help` works when the
+    /// executable is called directly. Other arguments may belong to AppKit or
+    /// Xcode and must continue through the normal application entry point.
     static var shouldRun: Bool {
-        if CommandLine.arguments.count > 1 { return true }
         let environment = ProcessInfo.processInfo.environment
-        return environment["KERO_CLI_STATE"]?.isEmpty == false
+        let hasBridge = environment["KERO_CLI_STATE"]?.isEmpty == false
             && environment["KERO_CLI_TOKEN"]?.isEmpty == false
+        if hasBridge { return true }
+        return CommandLine.arguments.dropFirst().first?.hasPrefix("+") == true
     }
 
     static func main() -> Never {
