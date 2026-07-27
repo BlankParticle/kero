@@ -172,6 +172,27 @@ enum Theme {
         changes.objectWillChange.send()
     }
 
+    /// Applies one catalog theme without changing the saved setting. The
+    /// bundled `kero +themes` browser uses this while the user moves through
+    /// its list, then either commits through `AppSettings` or restores the
+    /// saved pair with `reloadSelection`.
+    @MainActor
+    @discardableResult
+    static func previewSelection(named name: String, dark: Bool) -> Bool {
+        guard isCommonTheme(named: name, dark: dark),
+              let definition = definition(named: name)
+        else { return false }
+        selection.withLock {
+            if dark {
+                $0.dark = definition
+            } else {
+                $0.light = definition
+            }
+        }
+        changes.objectWillChange.send()
+        return true
+    }
+
     /// The selected ghostty theme for one appearance.
     nonisolated static func terminal(dark: Bool) -> GhosttyThemeDefinition {
         selection.withLock { dark ? $0.dark : $0.light }

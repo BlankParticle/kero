@@ -133,8 +133,16 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// session's working directory, then the pinned project directory
     /// (home when neither is known).
     @discardableResult
-    func newSession(directory: String? = nil) -> TerminalSession {
-        let session = makeSession(directory: directory)
+    func newSession(
+        directory: String? = nil,
+        commandArguments: [String]? = nil,
+        environmentPath: String? = nil
+    ) -> TerminalSession {
+        let session = makeSession(
+            directory: directory,
+            commandArguments: commandArguments,
+            environmentPath: environmentPath
+        )
         let tab = makeTab(content: .session(session))
         insertNextToSelected(tab)
         selectedTabID = tab.id
@@ -145,13 +153,18 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     /// it in a tab — shared by new tabs and splits. `restoredHistory` seeds the
     /// scrollback when reopening a saved session.
     private func makeSession(
-        directory: String? = nil, restoredHistory: String? = nil
+        directory: String? = nil,
+        restoredHistory: String? = nil,
+        commandArguments: [String]? = nil,
+        environmentPath: String? = nil
     ) -> TerminalSession {
         let session = TerminalSession(
             initialDirectory: directory
                 ?? selectedSession?.currentDirectoryPath
                 ?? customDirectory,
-            restoredHistory: restoredHistory
+            restoredHistory: restoredHistory,
+            commandArguments: commandArguments,
+            environmentPath: environmentPath
         )
         session.onExited = { [weak self] session in
             // Already dead — just drop its pane, no second terminate.

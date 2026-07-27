@@ -65,6 +65,11 @@ final class TerminalManager: nonisolated ObservableObject {
     /// Live managers in window-creation order; the persisted snapshot is
     /// one entry per registered manager.
     private static var registry: [TerminalManager] = []
+    private struct CLIProjectLaunch {
+        let arguments: [String]
+        let directory: String
+        let path: String?
+    }
     /// Folder requests can arrive while macOS is still launching Kero, before
     /// a WindowGroup has produced a manager/window to receive them.
     private static var pendingDirectories: [String] = []
@@ -184,6 +189,19 @@ final class TerminalManager: nonisolated ObservableObject {
         insert(project)
     }
 
+    /// Creates a CLI-requested project. An empty argv
+    /// starts the normal login shell; otherwise the terminal directly execs
+    /// the preserved argument vector with the caller's PATH.
+    private func newProject(cliLaunch: CLIProjectLaunch) {
+        let project = makeProject(createInitialSession: false)
+        project.newSession(
+            directory: cliLaunch.directory,
+            commandArguments: cliLaunch.arguments.isEmpty ? nil : cliLaunch.arguments,
+            environmentPath: cliLaunch.path
+        )
+        insert(project)
+    }
+
     private func insert(_ project: Project) {
         // Open the new project next to the current one rather than at the end.
         // Falls back to appending when nothing is selected yet.
@@ -239,6 +257,26 @@ final class TerminalManager: nonisolated ObservableObject {
         let directories = pendingDirectories
         pendingDirectories = []
         return directories
+    }
+
+    /// Creates a fresh project beside the current one for the bundled CLI.
+    static func openCLIProject(
+        arguments: [String],
+        directory: String,
+        path: String?
+    ) {
+        let manager = registry.first { $0.window === NSApp.keyWindow }
+            ?? registry.first { $0.window === NSApp.mainWindow }
+            ?? registry.last { $0.window != nil }
+        guard let manager else { return }
+        manager.newProject(
+            cliLaunch: CLIProjectLaunch(
+                arguments: arguments,
+                directory: directory,
+                path: path
+            )
+        )
+        manager.window?.makeKeyAndOrderFront(nil)
     }
 
     /// Installs SwiftUI's WindowGroup opener before any window needs to appear.
@@ -576,6 +614,14 @@ final class TerminalManager: nonisolated ObservableObject {
             for session in project.sessions {
                 session.applyTheme()
             }
+        }
+    }
+
+    /// Re-themes every open window for app-wide changes that do not mutate an
+    /// `AppSettings` publisher, such as a transient CLI theme preview.
+    static func refreshAllAppearances() {
+        for manager in registry {
+            manager.refreshAppearance()
         }
     }
 

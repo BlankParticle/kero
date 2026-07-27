@@ -5,7 +5,6 @@
 
 import SwiftUI
 
-@main
 struct keroApp: App {
     @NSApplicationDelegateAdaptor(KeroApplicationDelegate.self)
     private var applicationDelegate
