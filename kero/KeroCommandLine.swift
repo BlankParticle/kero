@@ -1,4 +1,5 @@
 import Darwin
+import Darwin.ncurses
 import Foundation
 
 private let notificationName = Notification.Name("sh.kero.cli")
@@ -47,19 +48,13 @@ private enum CLIError: Error, CustomStringConvertible {
     }
 }
 
-private var terminalStateAtExit: termios?
-private var alternateScreenAtExit = false
+private var cursesActiveAtExit = false
 
 private func restoreTerminalAtExit() {
-    if var state = terminalStateAtExit {
-        _ = tcsetattr(STDIN_FILENO, TCSAFLUSH, &state)
-        terminalStateAtExit = nil
-    }
-    if alternateScreenAtExit {
-        fputs("\u{1B}[?25h\u{1B}[?1049l", stdout)
-        fflush(stdout)
-        alternateScreenAtExit = false
-    }
+    guard cursesActiveAtExit else { return }
+    _ = curs_set(1)
+    _ = endwin()
+    cursesActiveAtExit = false
 }
 
 private func installExitHandlers() {
@@ -184,7 +179,6 @@ private final class ThemeBrowser {
     private var query = ""
     private var didPreview = false
     private var didSave = false
-    private var originalTerminalState = termios()
 
     init(
         connection: AppConnection,
@@ -372,36 +366,30 @@ private final class ThemeBrowser {
     }
 
     private func enterTerminalUI() throws {
-        guard tcgetattr(STDIN_FILENO, &originalTerminalState) == 0 else {
-            throw CLIError.message("Could not read terminal settings.")
+        guard initscr() != nil else {
+            throw CLIError.message("Could not initialize the interactive terminal.")
         }
-        terminalStateAtExit = originalTerminalState
+        cursesActiveAtExit = true
 
-        var raw = originalTerminalState
-        raw.c_lflag &= ~tcflag_t(ECHO | ICANON | IEXTEN | ISIG)
-        raw.c_iflag &= ~tcflag_t(IXON | ICRNL)
-        withUnsafeMutableBytes(of: &raw.c_cc) { bytes in
-            bytes[Int(VMIN)] = 1
-            bytes[Int(VTIME)] = 0
-        }
-        guard tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == 0 else {
-            terminalStateAtExit = nil
+        guard raw() != ERR,
+              noecho() != ERR,
+              keypad(stdscr, true) == OK
+        else {
+            restoreTerminalAtExit()
             throw CLIError.message("Could not enter interactive terminal mode.")
         }
 
-        writeOutput("\u{1B}[?1049h\u{1B}[?25l")
-        alternateScreenAtExit = true
+        // ncurses owns terminal modes, escape-sequence decoding, and alternate
+        // screen restoration. Kero still draws with ANSI because this browser
+        // only needs structured keyboard input, not a full widget framework.
+        _ = set_escdelay(25)
+        _ = curs_set(0)
+        _ = wrefresh(stdscr)
+        _ = untouchwin(stdscr)
     }
 
     private func leaveTerminalUI() {
-        if var state = terminalStateAtExit {
-            _ = tcsetattr(STDIN_FILENO, TCSAFLUSH, &state)
-            terminalStateAtExit = nil
-        }
-        if alternateScreenAtExit {
-            writeOutput("\u{1B}[?25h\u{1B}[?1049l")
-            alternateScreenAtExit = false
-        }
+        restoreTerminalAtExit()
     }
 
     private enum Key {
@@ -419,8 +407,22 @@ private final class ThemeBrowser {
     }
 
     private func readKey() -> Key {
-        guard let byte = readByte() else { return .cancel }
-        switch byte {
+        let code = wgetch(stdscr)
+        switch code {
+        case ERR:
+            return .cancel
+        case KEY_UP:
+            return .up
+        case KEY_DOWN:
+            return .down
+        case KEY_PPAGE:
+            return .pageUp
+        case KEY_NPAGE:
+            return .pageDown
+        case KEY_ENTER:
+            return .enter
+        case KEY_BACKSPACE:
+            return .backspace
         case 3, 4, 17:
             return .cancel
         case 9:
@@ -436,51 +438,22 @@ private final class ThemeBrowser {
         case 16:
             return .up
         case 27:
-            guard inputAvailable(withinMilliseconds: 25),
-                  readByte() == 91,
-                  inputAvailable(withinMilliseconds: 25),
-                  let code = readByte()
-            else { return .cancel }
-            switch code {
-            case 65: return .up
-            case 66: return .down
-            case 53:
-                _ = readByteIfAvailable()
-                return .pageUp
-            case 54:
-                _ = readByteIfAvailable()
-                return .pageDown
-            default: return .none
+            // keypad() has already translated recognized escape sequences.
+            // If another decoded value remains, this was an Option/Alt chord
+            // or an unknown sequence rather than a standalone Escape.
+            wtimeout(stdscr, 0)
+            let continuation = wgetch(stdscr)
+            wtimeout(stdscr, -1)
+            guard continuation == ERR else {
+                _ = flushinp()
+                return .none
             }
+            return .cancel
         case 32...126:
-            return .character(Character(UnicodeScalar(byte)))
+            return .character(Character(UnicodeScalar(UInt8(code))))
         default:
             return .none
         }
-    }
-
-    private func readByte() -> UInt8? {
-        var byte: UInt8 = 0
-        while true {
-            let count = Darwin.read(STDIN_FILENO, &byte, 1)
-            if count == 1 { return byte }
-            if count == 0 { return nil }
-            if errno != EINTR { return nil }
-        }
-    }
-
-    private func readByteIfAvailable() -> UInt8? {
-        guard inputAvailable(withinMilliseconds: 10) else { return nil }
-        return readByte()
-    }
-
-    private func inputAvailable(withinMilliseconds timeout: Int32) -> Bool {
-        var descriptor = pollfd(
-            fd: STDIN_FILENO,
-            events: Int16(POLLIN),
-            revents: 0
-        )
-        return Darwin.poll(&descriptor, 1, timeout) > 0
     }
 
     private func listHeight() -> Int {

@@ -12,9 +12,10 @@ import GhosttyTheme
 ///
 /// The CLI receives a per-launch secret and a generated catalog file through
 /// the terminal environment. Distributed notifications keep preview changes
-/// fast without opening a network listener; the secret prevents unrelated
-/// local processes from mutating Kero's settings by guessing the notification
-/// name.
+/// fast without opening a network listener. The token scopes requests to this
+/// Kero launch and rejects stale or accidental traffic; distributed
+/// notifications are observable by same-user processes, so this is not a
+/// security boundary against them.
 @MainActor
 final class KeroCLIService {
     static let shared = KeroCLIService()
