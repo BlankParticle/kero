@@ -188,6 +188,14 @@ extension KeroTerminalView: TerminalSurfaceProgressReportDelegate {
     }
 }
 
+extension KeroTerminalView: TerminalSurfaceCommandFinishedDelegate {
+    func terminalDidFinishCommand(exitCode: Int?, durationNanos: UInt64) {
+        events?.terminalDidReportShellIntegration(
+            .commandFinished(exitCode: exitCode, durationNanos: durationNanos)
+        )
+    }
+}
+
 extension KeroTerminalView: TerminalSurfaceOpenURLDelegate {
     func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
         // A history export borrows this callback as its synchronous return

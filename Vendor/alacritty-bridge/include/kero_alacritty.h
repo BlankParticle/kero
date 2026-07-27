@@ -29,6 +29,12 @@ extern "C" {
 /// Three bytes: state (0-4), percent (0-100), and whether percent is present.
 #define KERO_EVENT_PROGRESS 7u
 #define KERO_EVENT_NOTIFICATION 8u
+/// OSC 133 semantic prompt and command lifecycle markers.
+#define KERO_EVENT_SHELL_PROMPT_START 9u
+#define KERO_EVENT_SHELL_COMMAND_START 10u
+#define KERO_EVENT_SHELL_COMMAND_EXECUTING 11u
+/// Four-byte little-endian int32 exit code; -1 when the shell omitted it.
+#define KERO_EVENT_SHELL_COMMAND_FINISHED 12u
 
 /// Per-cell attributes in `KeroCell.flags`.
 #define KERO_CELL_INVERSE (1u << 0)

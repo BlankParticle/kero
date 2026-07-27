@@ -22,6 +22,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     @Published var title: String
     @Published var workingDirectory: String?
     @Published var hasExited = false
+    @Published private(set) var commandLifecycle = TerminalCommandLifecycle()
 
     /// The emulator driving this session. Fixed for the session's lifetime —
     /// changing the setting only affects terminals opened afterwards.
@@ -41,6 +42,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private var cachedShellPid: pid_t?
     private var lastHistorySnapshot: String?
     private var isTerminating = false
+    private var commandExecutionStartedAtNanos: UInt64?
 
     init(initialDirectory: String? = nil, restoredHistory: String? = nil) {
         let shellPath = Self.loginShell()
@@ -383,6 +385,29 @@ extension TerminalSession: TerminalBackendEvents {
         if !NSApp.isActive {
             NSApp.requestUserAttention(.informationalRequest)
         }
+    }
+
+    func terminalDidReportShellIntegration(_ event: TerminalShellIntegrationEvent) {
+        var lifecycle = commandLifecycle
+        switch event {
+        case .promptStart:
+            lifecycle.phase = .prompt
+        case .commandStart:
+            lifecycle.phase = .input
+        case .commandExecuting:
+            lifecycle.phase = .executing
+            commandExecutionStartedAtNanos = DispatchTime.now().uptimeNanoseconds
+        case let .commandFinished(exitCode, reportedDuration):
+            let measuredDuration = commandExecutionStartedAtNanos.flatMap { started in
+                let now = DispatchTime.now().uptimeNanoseconds
+                return now >= started ? now - started : nil
+            }
+            lifecycle.phase = .idle
+            lifecycle.lastExitCode = exitCode
+            lifecycle.lastDurationNanos = reportedDuration ?? measuredDuration
+            commandExecutionStartedAtNanos = nil
+        }
+        commandLifecycle = lifecycle
     }
 
     func terminalDidClose(processAlive: Bool) {

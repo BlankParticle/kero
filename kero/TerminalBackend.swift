@@ -206,6 +206,7 @@ protocol TerminalBackendEvents: AnyObject {
     func terminalDidChangeTitle(_ title: String)
     func terminalDidChangeWorkingDirectory(_ path: String)
     func terminalDidRingBell()
+    func terminalDidReportShellIntegration(_ event: TerminalShellIntegrationEvent)
 
     /// The child process is gone, or is about to be. `processAlive` is false
     /// when the backend has already reaped it.
@@ -222,6 +223,31 @@ protocol TerminalBackendEvents: AnyObject {
     func terminalDidEndFind()
     func terminalDidUpdateFindTotal(_ total: Int?)
     func terminalDidUpdateFindSelected(_ selected: Int?)
+}
+
+/// Backend-neutral OSC 133 command lifecycle reports. Alacritty extracts all
+/// four semantic markers at the PTY boundary; libghostty currently exposes
+/// the completed command with its measured duration.
+enum TerminalShellIntegrationEvent: Equatable, Sendable {
+    case promptStart
+    case commandStart
+    case commandExecuting
+    case commandFinished(exitCode: Int?, durationNanos: UInt64?)
+}
+
+/// Semantic state retained per terminal session for command navigation,
+/// completion notifications, duration display, and other future features.
+struct TerminalCommandLifecycle: Equatable, Sendable {
+    enum Phase: Equatable, Sendable {
+        case idle
+        case prompt
+        case input
+        case executing
+    }
+
+    var phase: Phase = .idle
+    var lastExitCode: Int?
+    var lastDurationNanos: UInt64?
 }
 
 /// Where the viewport sits within a surface's total content. Kept as raw row

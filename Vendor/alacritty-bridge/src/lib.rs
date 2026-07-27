@@ -50,6 +50,10 @@ pub const KERO_EVENT_CLIPBOARD_LOAD: u32 = 5;
 pub const KERO_EVENT_WORKING_DIRECTORY: u32 = 6;
 pub const KERO_EVENT_PROGRESS: u32 = 7;
 pub const KERO_EVENT_NOTIFICATION: u32 = 8;
+pub const KERO_EVENT_SHELL_PROMPT_START: u32 = 9;
+pub const KERO_EVENT_SHELL_COMMAND_START: u32 = 10;
+pub const KERO_EVENT_SHELL_COMMAND_EXECUTING: u32 = 11;
+pub const KERO_EVENT_SHELL_COMMAND_FINISHED: u32 = 12;
 
 /// Per-cell attributes handed to the renderer. A subset of
 /// `alacritty_terminal`'s `Flags` plus Kero's own `SELECTED`.
@@ -161,6 +165,10 @@ enum OscEvent {
     WorkingDirectory(String),
     Progress { state: u8, percent: Option<u8> },
     Notification(String),
+    ShellPromptStart,
+    ShellCommandStart,
+    ShellCommandExecuting,
+    ShellCommandFinished(Option<i32>),
 }
 
 #[derive(Debug, Default)]
@@ -281,6 +289,10 @@ impl OscInterceptor {
             return working_directory_from_osc7(url).map(OscEvent::WorkingDirectory);
         }
 
+        if let Some(value) = payload.strip_prefix("133;") {
+            return parse_shell_integration(value);
+        }
+
         let rest = payload.strip_prefix("9;")?;
         if let Some(progress) = rest.strip_prefix("4;") {
             return parse_progress(progress);
@@ -316,6 +328,25 @@ fn parse_progress(value: &str) -> Option<OscEvent> {
         .and_then(|value| value.parse::<u8>().ok())
         .map(|value| value.min(100));
     Some(OscEvent::Progress { state, percent })
+}
+
+/// FinalTerm semantic prompt markers, also emitted by modern shell
+/// integrations in Ghostty, iTerm2, VS Code, and Windows Terminal.
+fn parse_shell_integration(value: &str) -> Option<OscEvent> {
+    let mut fields = value.split(';');
+    match fields.next()? {
+        "A" => Some(OscEvent::ShellPromptStart),
+        "B" => Some(OscEvent::ShellCommandStart),
+        "C" => Some(OscEvent::ShellCommandExecuting),
+        "D" => {
+            let exit_code = fields
+                .next()
+                .filter(|value| !value.is_empty())
+                .and_then(|value| value.parse::<i32>().ok());
+            Some(OscEvent::ShellCommandFinished(exit_code))
+        }
+        _ => None,
+    }
 }
 
 fn clean_terminal_text(value: &str, max_bytes: usize) -> Option<String> {
@@ -423,6 +454,13 @@ impl Proxy {
             OscEvent::Notification(message) => {
                 self.emit(KERO_EVENT_NOTIFICATION, message.as_bytes())
             }
+            OscEvent::ShellPromptStart => self.emit(KERO_EVENT_SHELL_PROMPT_START, &[]),
+            OscEvent::ShellCommandStart => self.emit(KERO_EVENT_SHELL_COMMAND_START, &[]),
+            OscEvent::ShellCommandExecuting => self.emit(KERO_EVENT_SHELL_COMMAND_EXECUTING, &[]),
+            OscEvent::ShellCommandFinished(exit_code) => self.emit(
+                KERO_EVENT_SHELL_COMMAND_FINISHED,
+                &exit_code.unwrap_or(-1).to_le_bytes(),
+            ),
         }
     }
 }
@@ -1551,13 +1589,17 @@ mod tests {
     }
 
     #[test]
-    fn osc_interceptor_extracts_working_directory_progress_and_notification() {
+    fn osc_interceptor_extracts_host_integrations() {
         let mut interceptor = OscInterceptor::default();
         let input = concat!(
             "before",
             "\x1b]7;file://host/Users/egoist/My%20Project\x07",
             "\x1b]9;4;1;150\x1b\\",
             "\x1b]9;Build complete\x07",
+            "\x1b]133;A\x07",
+            "\x1b]133;B\x1b\\",
+            "\x1b]133;C\x07",
+            "\x1b]133;D;0\x1b\\",
             "after"
         );
         let (output, events) = intercept(&mut interceptor, input.as_bytes());
@@ -1572,6 +1614,31 @@ mod tests {
                     percent: Some(100),
                 },
                 OscEvent::Notification("Build complete".to_owned()),
+                OscEvent::ShellPromptStart,
+                OscEvent::ShellCommandStart,
+                OscEvent::ShellCommandExecuting,
+                OscEvent::ShellCommandFinished(Some(0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn osc_interceptor_parses_shell_completion_variants() {
+        let mut interceptor = OscInterceptor::default();
+        let input = concat!(
+            "\x1b]133;D\x07",
+            "\x1b]133;D;\x07",
+            "\x1b]133;D;17;aid=build\x07",
+        );
+        let (output, events) = intercept(&mut interceptor, input.as_bytes());
+
+        assert!(output.is_empty());
+        assert_eq!(
+            events,
+            vec![
+                OscEvent::ShellCommandFinished(None),
+                OscEvent::ShellCommandFinished(None),
+                OscEvent::ShellCommandFinished(Some(17)),
             ]
         );
     }
@@ -1588,10 +1655,10 @@ mod tests {
 
     #[test]
     fn osc_interceptor_handles_every_chunk_boundary() {
-        let input = b"left\x1b]7;file://host/tmp/project\x1b\\right";
+        let input = b"left\x1b]133;D;17\x1b\\right";
         let expected = (
             b"leftright".to_vec(),
-            vec![OscEvent::WorkingDirectory("/tmp/project".to_owned())],
+            vec![OscEvent::ShellCommandFinished(Some(17))],
         );
 
         for split in 0..=input.len() {

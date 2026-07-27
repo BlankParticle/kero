@@ -673,7 +673,11 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             || kind == KERO_EVENT_EXIT
             || kind == KERO_EVENT_CLIPBOARD_LOAD
             || kind == KERO_EVENT_WORKING_DIRECTORY
-            || kind == KERO_EVENT_NOTIFICATION {
+            || kind == KERO_EVENT_NOTIFICATION
+            || kind == KERO_EVENT_SHELL_PROMPT_START
+            || kind == KERO_EVENT_SHELL_COMMAND_START
+            || kind == KERO_EVENT_SHELL_COMMAND_EXECUTING
+            || kind == KERO_EVENT_SHELL_COMMAND_FINISHED {
             if pendingEvents.count < 64 {
                 pendingEvents.append((kind, payload))
             }
@@ -740,6 +744,25 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
             let message = String(decoding: payload, as: UTF8.self)
             guard !message.isEmpty else { return }
             events?.terminalDidRequestDesktopNotification(title: "", body: message)
+        case KERO_EVENT_SHELL_PROMPT_START:
+            events?.terminalDidReportShellIntegration(.promptStart)
+        case KERO_EVENT_SHELL_COMMAND_START:
+            events?.terminalDidReportShellIntegration(.commandStart)
+        case KERO_EVENT_SHELL_COMMAND_EXECUTING:
+            events?.terminalDidReportShellIntegration(.commandExecuting)
+        case KERO_EVENT_SHELL_COMMAND_FINISHED:
+            guard payload.count == MemoryLayout<Int32>.size else { return }
+            var rawExitCode: Int32 = -1
+            _ = withUnsafeMutableBytes(of: &rawExitCode) { bytes in
+                payload.copyBytes(to: bytes)
+            }
+            let exitCode = Int32(littleEndian: rawExitCode)
+            events?.terminalDidReportShellIntegration(
+                .commandFinished(
+                    exitCode: exitCode < 0 ? nil : Int(exitCode),
+                    durationNanos: nil
+                )
+            )
         default:
             break
         }
