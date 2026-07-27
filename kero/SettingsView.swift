@@ -96,20 +96,16 @@ struct SettingsView: View {
             }
 
             Section("Terminal") {
-                // Only worth a control once there is a choice to make. A
-                // Picker cannot disable individual options — SwiftUI ignores
-                // `.disabled` on them — so listing a backend Kero has no
-                // surface for would offer a selection that silently does
-                // nothing. The enum, the `terminal.backend` config key, and
-                // `TerminalBackendSurface` are all in place, so this row
-                // appears on its own the moment a second backend ships.
+                // Only show this once there is a real choice. `selectable`
+                // omits backends this build cannot create, so every tab here
+                // takes effect instead of silently producing a dead pane.
                 if TerminalBackend.selectable.count > 1 {
-                    Picker("Backend", selection: $settings.terminalBackend) {
-                        ForEach(TerminalBackend.selectable) { backend in
-                            Text(backend.displayName).tag(backend)
-                        }
+                    HStack(alignment: .top) {
+                        Text("Backend")
+                        Spacer()
+                        TerminalBackendPicker(selection: $settings.terminalBackend)
                     }
-                    Text(settings.terminalBackend.summary)
+                    Text("Changes apply to new terminals.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -252,6 +248,65 @@ private struct ThemeOption: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(theme.title)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// Keeps every available engine visible, following the same selection model
+/// as the Appearance tabs above while leaving room for capability differences.
+private struct TerminalBackendPicker: View {
+    @Binding var selection: TerminalBackend
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            ForEach(TerminalBackend.selectable) { backend in
+                TerminalBackendOption(
+                    backend: backend,
+                    isSelected: selection == backend,
+                    select: { selection = backend }
+                )
+            }
+        }
+        .frame(maxWidth: 310)
+    }
+}
+
+private struct TerminalBackendOption: View {
+    let backend: TerminalBackend
+    let isSelected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(backend.displayName)
+                    .font(.callout)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                Text(backend.settingsDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.accentColor.opacity(isSelected ? 0.15 : 0))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(
+                        isSelected ? Color.accentColor : Color.primary.opacity(0.12),
+                        lineWidth: isSelected ? 2 : 0.5
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(backend.displayName)
+        .accessibilityHint(backend.settingsDescription)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }

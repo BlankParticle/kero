@@ -49,13 +49,13 @@ enum TerminalBackend: String, CaseIterable, Identifiable, Sendable {
         allCases.filter(\.isAvailable)
     }
 
-    /// One line under the Settings picker, describing this backend.
-    var summary: String {
+    /// Concise capability summary shown inside this backend's Settings tab.
+    var settingsDescription: String {
         switch self {
         case .libghostty:
-            "Ghostty's GPU-accelerated emulator, embedded in Kero."
+            "Default. Supports terminal graphics and Kitty keyboard input."
         case .alacritty:
-            "Alacritty's emulator core, drawn by Kero. Terminal graphics and Kitty keyboard input are not supported; open a new terminal for a change here to take effect."
+            "Alternative renderer. Terminal graphics and Kitty keyboard input are unsupported."
         }
     }
 
