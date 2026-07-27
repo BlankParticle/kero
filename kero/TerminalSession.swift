@@ -431,6 +431,7 @@ extension TerminalSession: TerminalBackendEvents {
             lifecycle.phase = .idle
             lifecycle.lastExitCode = exitCode
             lifecycle.lastDurationNanos = reportedDuration ?? measuredDuration
+            lifecycle.completionSequence &+= 1
             commandExecutionStartedAtNanos = nil
         }
         commandLifecycle = lifecycle
