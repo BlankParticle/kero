@@ -238,12 +238,15 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         replaceBackingLayer(with: frozenLayer)
     }
 
-    /// Re-renders the retained image while another Kero window, such as
-    /// Settings, owns key focus. A normal scheduled frame cannot update this
-    /// state because the inactive terminal is backed by a plain `CALayer`, not
-    /// a `CAMetalLayer`.
+    /// Re-renders the retained image while Kero or its terminal window is not
+    /// focused. A normal scheduled frame cannot update this state because the
+    /// inactive terminal is backed by a plain `CALayer`, not a `CAMetalLayer`.
+    ///
+    /// The Metal layer exists only long enough to produce the new retained
+    /// frame, so a background script can remain visibly live without restoring
+    /// the idle drawable pool between output events.
     private func refreshFrozenFrame() {
-        guard isSurfaceVisible, NSApp.isActive, !(layer is CAMetalLayer) else {
+        guard isSurfaceVisible, !(layer is CAMetalLayer) else {
             scheduleRender(force: true)
             return
         }
@@ -509,7 +512,11 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         RunLoop.main.perform(inModes: [.common]) { [weak self] in
             guard let self else { return }
             renderScheduled = false
-            renderFrame()
+            if layer is CAMetalLayer {
+                renderFrame()
+            } else {
+                refreshFrozenFrame()
+            }
         }
     }
 

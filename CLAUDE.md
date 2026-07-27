@@ -14,5 +14,8 @@ Build, run the app, exercise the change;
 ## Conventions
 
 - Match the file you're in. Comments explain *why* — keep them, add them.
-- User-visible changes get a bullet under `## [unrelease]` in
-  [CHANGELOG.md](CHANGELOG.md), in the voice of the in-app release notes.
+- [CHANGELOG.md](CHANGELOG.md) is the product changelog for end users, not a
+  development log. Describe only the final user-visible outcome intended to
+  ship. Never add or revise release notes for incremental fixes, refactors,
+  implementation details, or regressions introduced and resolved while a
+  feature is still in progress on an unreleased branch.
