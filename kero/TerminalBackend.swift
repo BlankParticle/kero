@@ -56,28 +56,20 @@ enum TerminalBackend: String, CaseIterable, Identifiable, Sendable {
         allCases.filter(\.isAvailable)
     }
 
-    /// Concise capability summary shown inside this backend's Settings tab.
-    var settingsDescription: String {
-        switch self {
-        case .libghostty:
-            "Full-featured default."
-        case .alacritty:
-            "Performance-focused alternative."
-        }
-    }
-
-    /// Scannable strengths and limitations shown below the summary.
+    /// Scannable strengths and limitations shown below the backend name.
     var settingsHighlights: [TerminalBackendHighlight] {
         switch self {
         case .libghostty:
             [
                 .init(title: "Excellent performance", isPositive: true),
+                .init(title: "GPU-accelerated", isPositive: true),
                 .init(title: "Terminal graphics", isPositive: true),
                 .init(title: "Kitty keyboard", isPositive: true),
             ]
         case .alacritty:
             [
                 .init(title: "Excellent performance", isPositive: true),
+                .init(title: "GPU-accelerated", isPositive: true),
                 .init(title: "Terminal graphics", isPositive: false),
                 .init(title: "Kitty keyboard", isPositive: false),
             ]
