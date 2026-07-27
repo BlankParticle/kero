@@ -104,6 +104,7 @@ pub(crate) struct KittyGraphicsInterceptor {
     state: InterceptorState,
     command: Vec<u8>,
     oversized: bool,
+    utf8_continuations: u8,
 }
 
 impl KittyGraphicsInterceptor {
@@ -118,11 +119,27 @@ impl KittyGraphicsInterceptor {
 
         for &byte in bytes {
             match self.state {
-                InterceptorState::Ground => match byte {
-                    0x1b => self.state = InterceptorState::Escape,
-                    0x9f => self.state = InterceptorState::ApcStart { c1: true },
-                    _ => text.push(byte),
-                },
+                InterceptorState::Ground => {
+                    if self.utf8_continuations > 0 && (0x80..=0xbf).contains(&byte) {
+                        text.push(byte);
+                        self.utf8_continuations -= 1;
+                        continue;
+                    }
+                    self.utf8_continuations = 0;
+                    match byte {
+                        0x1b => self.state = InterceptorState::Escape,
+                        0x9f => self.state = InterceptorState::ApcStart { c1: true },
+                        _ => {
+                            text.push(byte);
+                            self.utf8_continuations = match byte {
+                                0xc2..=0xdf => 1,
+                                0xe0..=0xef => 2,
+                                0xf0..=0xf4 => 3,
+                                _ => 0,
+                            };
+                        }
+                    }
+                }
                 InterceptorState::Escape => {
                     if byte == b'_' {
                         self.state = InterceptorState::ApcStart { c1: false };
@@ -1188,29 +1205,15 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn diagnoses_terminal_image_cli_capture() {
-        let bytes = std::fs::read("/tmp/kero-terminal-image-2.typescript").unwrap();
+    fn interceptor_does_not_treat_utf8_continuation_as_c1_apc() {
         let mut interceptor = KittyGraphicsInterceptor::default();
-        let mut graphics = KittyGraphicsState::default();
-        let mut command_count = 0;
-        for item in interceptor.process(&bytes) {
-            if let KittyGraphicsItem::Command(command) = item {
-                command_count += 1;
-                let _ = graphics.apply(
-                    command,
-                    0,
-                    1,
-                    0,
-                    size(),
-                    KittyGraphicsScreen::Primary,
-                );
-            }
-        }
-        let placements =
-            graphics.render_placements(0, 0, 24, 80, KittyGraphicsScreen::Primary);
-        eprintln!("commands={command_count} placements={}", placements.len());
-        assert_eq!(placements.len(), 1);
+        assert!(
+            matches!(interceptor.process(b"\xf0").as_slice(), [KittyGraphicsItem::Text(text)] if text == b"\xf0")
+        );
+        let items = interceptor.process(b"\x9f\x94\x8d Resolving\x1b_Ga=q,i=7;AAAA\x1b\\");
+        assert!(
+            matches!(&items[0], KittyGraphicsItem::Text(text) if text == b"\x9f\x94\x8d Resolving")
+        );
+        assert!(matches!(&items[1], KittyGraphicsItem::Command(_)));
     }
-
 }
