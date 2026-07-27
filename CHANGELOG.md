@@ -12,7 +12,7 @@ set in the Xcode project.
 
 ## [unrelease]
 
-- Choose which terminal emulator drives new panes in Settings → Terminal → Backend. Ghostty remains the default, while the new Alacritty backend supports Kero’s fonts, themes, color emoji, selection, scrollback, find, clipboard protections, mouse-aware TUIs, styled session restore, and OSC 7, 8, 9, and 133 integrations. Terminal graphics and Kitty keyboard input remain unsupported in Alacritty.
+- Choose which terminal emulator drives new panes in Settings → Terminal → Backend. Ghostty remains the default, while the new Alacritty backend supports Kero’s fonts, shared color themes, color emoji, selection, scrollback, find, clipboard protections, mouse-aware TUIs, styled session restore, and OSC 7, 8, 9, and 133 integrations. The Colors pickers now offer a compact catalog of popular themes shared by both engines; terminal graphics and Kitty keyboard input remain unsupported in Alacritty.
 
 ## [0.1.26]
 

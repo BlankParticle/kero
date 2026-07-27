@@ -163,13 +163,10 @@ struct SettingsView: View {
         TerminalFont.resolve(family: settings.fontFamily, size: CGFloat(settings.fontSize))
     }
 
-    /// Kero's built-in Default theme first, then every bundled theme, split
-    /// by background luminance so each picker offers themes that suit its
-    /// appearance slot.
-    private static let darkThemeNames = [Theme.defaultDarkThemeName]
-        + GhosttyThemeCatalog.allThemes.filter(\.isDark).map(\.name)
-    private static let lightThemeNames = [Theme.defaultLightThemeName]
-        + GhosttyThemeCatalog.allThemes.filter { !$0.isDark }.map(\.name)
+    /// The compact catalog of popular themes shared by both terminal backends,
+    /// split by the appearance slot they suit.
+    private static let darkThemeNames = Theme.commonDarkThemes.map(\.name)
+    private static let lightThemeNames = Theme.commonLightThemes.map(\.name)
 }
 
 /// Sizes its sole child to the child's ideal height, capped at `maxHeight`.

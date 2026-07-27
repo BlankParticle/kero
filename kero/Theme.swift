@@ -46,8 +46,8 @@ final class ThemeChanges: nonisolated ObservableObject {}
 /// `NSColor` properties derive window chrome from the same palette and adapt
 /// to the system appearance.
 enum Theme {
-    static let defaultDarkThemeName = "Default Dark"
-    static let defaultLightThemeName = "Default Light"
+    nonisolated static let defaultDarkThemeName = "Default Dark"
+    nonisolated static let defaultLightThemeName = "Default Light"
 
     @MainActor static let changes = ThemeChanges()
 
@@ -61,6 +61,60 @@ enum Theme {
     nonisolated static let defaultLightDefinition = keroDefault(
         named: defaultLightThemeName, from: "GitHub Light Default", dark: false
     )
+
+    /// Popular themes present in both Ghostty's bundled catalog and the
+    /// official `alacritty/alacritty-theme` collection. Keep this list compact:
+    /// with Kero's two defaults, Settings exposes at most 30 themes.
+    /// A few equivalent themes use different catalog names (for example
+    /// Atom One Dark / one_dark); those aliases are included after comparing
+    /// their definitions.
+    private nonisolated static let commonCatalogThemeNames: Set<String> = [
+        "Atom One Dark",
+        "Atom One Light",
+        "Ayu",
+        "Ayu Light",
+        "Ayu Mirage",
+        "Catppuccin Latte",
+        "Catppuccin Macchiato",
+        "Catppuccin Mocha",
+        "Dark+",
+        "Dracula",
+        "Everforest Dark Hard",
+        "Flexoki Light",
+        "GitHub Dark",
+        "Gruvbox Dark",
+        "Gruvbox Light",
+        "iTerm2 Solarized Dark",
+        "iTerm2 Solarized Light",
+        "Kanagawa Wave",
+        "Material",
+        "Monokai Pro",
+        "Night Owl",
+        "Nord",
+        "Rose Pine",
+        "Rose Pine Dawn",
+        "Rose Pine Moon",
+        "TokyoNight",
+        "TokyoNight Day",
+        "TokyoNight Storm",
+    ]
+
+    /// Kero's Default comes first; the duplicate GitHub Default catalog rows
+    /// are intentionally omitted because the built-ins use those palettes.
+    nonisolated static let commonDarkThemes: [GhosttyThemeDefinition] =
+        [defaultDarkDefinition] + GhosttyThemeCatalog.allThemes.filter {
+            $0.isDark && commonCatalogThemeNames.contains($0.name)
+        }
+
+    nonisolated static let commonLightThemes: [GhosttyThemeDefinition] =
+        [defaultLightDefinition] + GhosttyThemeCatalog.allThemes.filter {
+            !$0.isDark && commonCatalogThemeNames.contains($0.name)
+        }
+
+    nonisolated static func isCommonTheme(named name: String, dark: Bool) -> Bool {
+        let themes = dark ? commonDarkThemes : commonLightThemes
+        return themes.contains { $0.name == name }
+    }
 
     /// The selected definitions, mirrored out of `AppSettings` because the
     /// dynamic color providers below may resolve outside the main actor.

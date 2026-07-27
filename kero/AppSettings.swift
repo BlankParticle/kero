@@ -100,10 +100,14 @@ final class AppSettings: nonisolated ObservableObject {
         let toml = existing ?? Self.legacyDefaults()
         theme = toml["theme"]?.string.flatMap(AppTheme.init(rawValue:)) ?? .system
         themeDark = Self.knownTheme(
-            toml["theme-dark"]?.string, fallback: Theme.defaultDarkThemeName
+            toml["theme-dark"]?.string,
+            dark: true,
+            fallback: Theme.defaultDarkThemeName
         )
         themeLight = Self.knownTheme(
-            toml["theme-light"]?.string, fallback: Theme.defaultLightThemeName
+            toml["theme-light"]?.string,
+            dark: false,
+            fallback: Theme.defaultLightThemeName
         )
         fontFamily = toml["font-family"]?.string ?? ""
         let size = toml["font-size"]?.double ?? Self.defaultFontSize
@@ -123,11 +127,13 @@ final class AppSettings: nonisolated ObservableObject {
         Theme.reloadSelection(light: themeLight, dark: themeDark)
     }
 
-    /// A saved theme name, or `fallback` when it's absent or names neither a
-    /// kero built-in nor a catalog theme (so the Settings pickers never show
-    /// an empty selection).
-    private static func knownTheme(_ name: String?, fallback: String) -> String {
-        guard let name, Theme.definition(named: name) != nil else {
+    /// A saved shared-theme name, or `fallback` when it is absent or no longer
+    /// part of the cross-backend catalog, so Settings never shows an empty
+    /// selection after upgrading from the larger Ghostty-only list.
+    private static func knownTheme(
+        _ name: String?, dark: Bool, fallback: String
+    ) -> String {
+        guard let name, Theme.isCommonTheme(named: name, dark: dark) else {
             return fallback
         }
         return name
