@@ -298,7 +298,7 @@ private struct TerminalBackendOption: View {
                 }
                 .padding(.top, 2)
             }
-            .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(8)
             .background(
                 RoundedRectangle(cornerRadius: 10)
