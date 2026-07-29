@@ -89,7 +89,7 @@ struct PaneLayoutView: View {
         }
         // Inset the whole grid from the parent by the same gap used between
         // tiles, so a split tab has even breathing room on every side. A
-        // single-pane tab stays full-bleed, exactly as before splits existed.
+        // single-pane tab stays full-bleed.
         .padding(tab.hasMultiplePanes ? gap : 0)
         .onPreferenceChange(PaneFramePreferenceKey.self) { paneFrames = $0 }
         // A divider or pane-move drag can't deliver its ending callback once
@@ -410,23 +410,22 @@ private struct ResizableDivider: View {
 }
 
 /// One tile: hosts its content and, when the tab holds more than one pane,
-/// draws a focus ring (accent for the focused pane, faint otherwise), a thin
-/// top strip you can grab to move the pane onto another, and a highlight while
-/// it's the drop target.
+/// draws an accent focus ring, its own title/actions header you can grab to
+/// move the pane onto another, and a highlight while it's the drop target.
 private struct PaneView: View {
     @ObservedObject var tab: PaneTab
     @ObservedObject private var themeChanges = Theme.changes
     let pane: Pane
     let showFocusRing: Bool
-    /// Whether the top grab strip is offered at all — false while zoomed,
-    /// where there is no other pane on screen to drop onto.
+    /// Whether the header can be grabbed — false while zoomed, where there is
+    /// no other pane on screen to drop onto.
     let allowsMove: Bool
     /// The pane currently being carried by a move drag (dimmed).
     let isMoveSource: Bool
     /// When this pane is the drop target, the edge the carried pane will land
     /// on — drives the half-pane preview. Nil when it isn't the target.
     let dropEdge: PaneDropEdge?
-    /// Reports the pointer (global space) as the top strip is dragged.
+    /// Reports the pointer (global space) as the header title is dragged.
     let onMove: (CGPoint) -> Void
     let onMoveEnded: () -> Void
     /// Splits the focused pane on the given edge (from the content's context
@@ -434,12 +433,6 @@ private struct PaneView: View {
     let onSplit: (PaneDropEdge) -> Void
     let onNewBrowserTab: (String?) -> Void
     let onNewBrowserPane: (String?) -> Void
-
-    /// Height of the grab strip at the pane's top.
-    private let handleHeight: CGFloat = 8
-
-    @State private var isHandleHovered = false
-    @State private var isDragging = false
 
     private var isFocused: Bool { tab.focusedPaneID == pane.id }
 
@@ -452,18 +445,31 @@ private struct PaneView: View {
     }
 
     var body: some View {
-        // Single-pane tabs render exactly as before splits existed — no ring,
-        // no handle — so nothing about the common case changes.
+        // A split pane gets focus-aware chrome and its own header. Single-pane
+        // tabs render their content without pane chrome.
         if showFocusRing {
-            content
+            VStack(spacing: 0) {
+                PaneHeaderView(
+                    content: pane.content,
+                    isFocused: isFocused,
+                    allowsMove: allowsMove,
+                    focus: focus,
+                    onMove: onMove,
+                    onMoveEnded: onMoveEnded,
+                    onSplit: splitFromMenu
+                )
+                // The tooltip hangs into the terminal below. Keep the header
+                // above that AppKit-backed sibling so its material and text
+                // aren't covered while only the shadow remains visible.
+                .zIndex(1)
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
                 // Deliberately no clip: masking an AppKit view forces an
                 // offscreen recomposite that flickers on live resize. The
                 // content background matches the surrounding gaps, so square
                 // content corners blend in and only the rounded stroke reads.
                 .overlay { focusRing }
-                .overlay(alignment: .top) {
-                    if allowsMove { moveHandle }
-                }
                 .overlay { dropHighlight }
                 .opacity(isMoveSource ? 0.55 : 1)
                 .background(frameReporter)
@@ -532,56 +538,12 @@ private struct PaneView: View {
     }
 
     private var focusRing: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
             .strokeBorder(
                 isFocused
                     ? Color(nsColor: Theme.accent).opacity(0.85)
-                    : Color.primary.opacity(0.06),
+                    : Color(nsColor: Theme.accent).opacity(0.35),
                 lineWidth: isFocused ? 1.5 : 1
-            )
-    }
-
-    /// Thin strip pinned to the pane's top edge — an absolutely-positioned grab
-    /// handle over the content — that you drag to move this pane onto another.
-    /// A grab bar fades in on hover so the zone is easy to find; the strip sits
-    /// in the terminal's own top padding, so it doesn't cover text. Global
-    /// coordinate space so the reported location survives the layout shifting.
-    private var moveHandle: some View {
-        Color.clear
-            .frame(height: handleHeight)
-            .frame(maxWidth: .infinity)
-            .overlay {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .opacity(isHandleHovered ? 0.9 : 0)
-            }
-            .contentShape(Rectangle())
-            // onContinuousHover (not onHover): re-assert the open hand on every
-            // move so it wins against the terminal re-setting its own cursor.
-            // On exit, reset explicitly — moving *up* off the handle lands in the
-            // gap, which has no cursor management to revert it otherwise. Both
-            // guarded by !isDragging so they never fight the drag cursor.
-            .onContinuousHover { phase in
-                switch phase {
-                case .active:
-                    isHandleHovered = true
-                    if !isDragging { NSCursor.openHand.set() }
-                case .ended:
-                    isHandleHovered = false
-                    if !isDragging { NSCursor.arrow.set() }
-                }
-            }
-            .gesture(
-                DragGesture(minimumDistance: 4, coordinateSpace: .global)
-                    .onChanged { value in
-                        isDragging = true
-                        onMove(value.location)
-                    }
-                    .onEnded { _ in
-                        isDragging = false
-                        onMoveEnded()
-                    }
             )
     }
 
@@ -590,10 +552,10 @@ private struct PaneView: View {
         if let dropEdge {
             GeometryReader { geo in
                 let rect = highlightRect(for: dropEdge, in: geo.size)
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color(nsColor: Theme.accent).opacity(0.18))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(Color(nsColor: Theme.accent), lineWidth: 2)
                     )
                     .frame(width: rect.width, height: rect.height)
@@ -620,6 +582,216 @@ private struct PaneView: View {
                 value: [pane.id: proxy.frame(in: .global)]
             )
         }
+    }
+}
+
+/// Compact chrome for a pane in a split tab. The title region is the pane-move
+/// handle; the trailing buttons keep the common split directions within the
+/// pane they act on.
+private struct PaneHeaderView: View {
+    @ObservedObject private var themeChanges = Theme.changes
+    let content: PaneContent
+    let isFocused: Bool
+    let allowsMove: Bool
+    let focus: () -> Void
+    let onMove: (CGPoint) -> Void
+    let onMoveEnded: () -> Void
+    let onSplit: (PaneDropEdge) -> Void
+
+    @State private var isMoveHovered = false
+    @State private var isDragging = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            moveRegion
+
+            paneAction(
+                systemImage: "rectangle.split.2x1",
+                label: "Split Right",
+                tooltip: "Split Right (⌘D)",
+                edge: .right
+            )
+            paneAction(
+                systemImage: "rectangle.split.1x2",
+                label: "Split Down",
+                tooltip: "Split Down (⇧⌘D)",
+                edge: .bottom
+            )
+        }
+        .padding(.leading, 9)
+        .padding(.trailing, 5)
+        .frame(height: 30)
+        .background(Color(nsColor: Theme.background))
+    }
+
+    @ViewBuilder
+    private var moveRegion: some View {
+        if allowsMove {
+            title
+                .contentShape(Rectangle())
+                .onTapGesture(perform: focus)
+                // Re-assert the hand as the terminal changes the cursor while
+                // the pointer crosses the pane boundary below the header.
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active:
+                        isMoveHovered = true
+                        if !isDragging { NSCursor.openHand.set() }
+                    case .ended:
+                        isMoveHovered = false
+                        if !isDragging { NSCursor.arrow.set() }
+                    }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                        .onChanged { value in
+                            isDragging = true
+                            onMove(value.location)
+                        }
+                        .onEnded { _ in
+                            isDragging = false
+                            onMoveEnded()
+                        }
+                )
+        } else {
+            title
+                .contentShape(Rectangle())
+                .onTapGesture(perform: focus)
+        }
+    }
+
+    private var title: some View {
+        PaneHeaderTitle(content: content, isFocused: isFocused)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(isMoveHovered ? 1 : 0.9)
+    }
+
+    private func paneAction(
+        systemImage: String,
+        label: LocalizedStringKey,
+        tooltip: LocalizedStringKey,
+        edge: PaneDropEdge
+    ) -> some View {
+        Button {
+            focus()
+            onSplit(edge)
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 14, height: 14)
+                .padding(4)
+                .contentShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .tooltip(tooltip, edge: .below, alignment: .trailing)
+    }
+}
+
+/// Per-kind wrappers observe the content object itself so live terminal titles,
+/// browser favicons, file renames and dirty state update without rebuilding the
+/// surrounding pane layout.
+private struct PaneHeaderTitle: View {
+    let content: PaneContent
+    let isFocused: Bool
+
+    @ViewBuilder
+    var body: some View {
+        switch content {
+        case .session(let session):
+            SessionPaneHeaderTitle(session: session, isFocused: isFocused)
+        case .file(let file):
+            FilePaneHeaderTitle(file: file, isFocused: isFocused)
+        case .browser(let browser):
+            BrowserPaneHeaderTitle(browser: browser, isFocused: isFocused)
+        case .diff(let diff):
+            PaneHeaderLabel(
+                systemImage: "plus.forwardslash.minus",
+                title: diff.title,
+                isFocused: isFocused
+            )
+        }
+    }
+}
+
+private struct SessionPaneHeaderTitle: View {
+    @ObservedObject var session: TerminalSession
+    let isFocused: Bool
+
+    var body: some View {
+        PaneHeaderLabel(
+            systemImage: "terminal",
+            title: session.title,
+            isFocused: isFocused
+        )
+    }
+}
+
+private struct FilePaneHeaderTitle: View {
+    @ObservedObject var file: FileTab
+    let isFocused: Bool
+
+    var body: some View {
+        PaneHeaderLabel(
+            systemImage: "doc.text",
+            title: file.name,
+            isFocused: isFocused,
+            isDirty: file.isDirty
+        )
+        .help(file.path)
+    }
+}
+
+private struct BrowserPaneHeaderTitle: View {
+    @ObservedObject var browser: BrowserTab
+    let isFocused: Bool
+
+    var body: some View {
+        PaneHeaderLabel(
+            systemImage: "globe",
+            browser: browser,
+            title: browser.title,
+            isFocused: isFocused
+        )
+        .help(browser.urlString)
+    }
+}
+
+private struct PaneHeaderLabel: View {
+    let systemImage: String
+    var browser: BrowserTab? = nil
+    let title: String
+    let isFocused: Bool
+    var isDirty = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let browser {
+                BrowserFaviconView(browser: browser, size: 12)
+                    .foregroundStyle(iconStyle)
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(iconStyle)
+            }
+            Text(verbatim: title)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(isFocused ? .primary : .secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if isDirty {
+                Circle()
+                    .fill(.secondary)
+                    .frame(width: 5, height: 5)
+            }
+        }
+    }
+
+    private var iconStyle: AnyShapeStyle {
+        isFocused
+            ? AnyShapeStyle(Color(nsColor: Theme.accent))
+            : AnyShapeStyle(.tertiary)
     }
 }
 
