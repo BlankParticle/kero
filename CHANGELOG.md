@@ -16,6 +16,19 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unrelease]
 
+## [0.1.34]
+
+- Show terminal titles verbatim while keeping sidebar project rows stable as titles update or hover controls appear
+- Follow the terminal's foreground job into another checkout: when an agent
+  switches to its own git worktree, Files, Git and Info re-root to it
+- Settings font preview now reflects “Thicken font strokes”
+- Prevent terminal tabs from crashing after switching sessions or resizing during a partial redraw
+- Files created in a terminal now use your system's default permissions instead of being made private to your user
+
+## [0.1.33]
+
+- Fix: never set `LANG` env for the terminal session
+
 ## [0.1.32]
 
 - Add native English, Simplified Chinese, and Japanese localization throughout the app, with a language picker in Settings

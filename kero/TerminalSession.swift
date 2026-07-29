@@ -205,6 +205,20 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         return launchWorkingDirectory
     }
 
+    /// Working directory of the terminal's foreground job, when that job is
+    /// something other than the shell itself. Coding agents change their own
+    /// process directory when they move to another checkout — Claude Code's
+    /// worktree switch is a `chdir` inside the running `claude` process — and
+    /// the shell never moves, so no OSC 7 arrives and `currentDirectoryPath`
+    /// keeps describing the old tree. This is deliberately a separate fact:
+    /// `currentDirectoryPath` must stay true to the shell.
+    var foregroundDirectoryPath: String? {
+        guard let foreground = surface.foregroundPid, foreground > 0,
+              foreground != shellPid
+        else { return nil }
+        return processWorkingDirectory(pid: foreground)
+    }
+
     func sendCommand(_ text: String) {
         surface.sendText(text)
     }
@@ -275,9 +289,8 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         if let pathOverride, !pathOverride.isEmpty {
             environment["PATH"] = pathOverride
         }
-        if ProcessInfo.processInfo.environment["LANG"] == nil {
-            environment["LANG"] = "en_US.UTF-8"
-        }
+        // Locale belongs to the user's shell environment. Kero's app language
+        // must never synthesize or override LANG/LC_* for terminal processes.
         return environment
     }
 
@@ -334,9 +347,17 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         pidFileURL: URL?,
         replayFileURL: URL?
     ) -> String {
-        var commands = ["umask 077"]
+        var commands: [String] = []
         if let pidFileURL {
-            commands.append("printf '%s\\n' \"$$\" > \(shellQuote(pidFileURL.path))")
+            // The PID file is the only thing this script creates, so the
+            // tightened mask stays inside a subshell: `umask` outlives the
+            // `exec` below, and a terminal that leaves the user's shell at 077
+            // silently makes every file they create private. `$$` keeps
+            // expanding to this shell's PID inside the subshell — the same PID
+            // `exec` hands to the shell itself.
+            commands.append(
+                "(umask 077; printf '%s\\n' \"$$\" > \(shellQuote(pidFileURL.path)))"
+            )
         }
         if let replayFileURL {
             let path = shellQuote(replayFileURL.path)
@@ -365,7 +386,7 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         }
         // Ghostty's macOS launcher prepends `exec -l` to a shell command.
         // Keeping the setup as one compound command means `exec -l` does not
-        // stop after the first shell builtin (`umask`).
+        // stop after the first shell builtin.
         return commands.joined(separator: "; ")
     }
 
