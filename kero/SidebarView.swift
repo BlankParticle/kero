@@ -294,39 +294,41 @@ private struct SidebarProjectRow: View {
 
     private var rowContent: some View {
         HStack(spacing: 8) {
-            Image(systemName: "folder")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(isSelected ? Color(nsColor: Theme.accent) : .secondary)
-
-            VStack(alignment: .leading, spacing: 1) {
-                // Activity glyph is separate and fixed-width so Braille
-                // spinner frames do not reflow the project name (or shift
-                // neighboring rows) while an agent is working.
-                HStack(spacing: 3) {
-                    Text(project.activityIndicator ?? "")
+            // Activity replaces the folder inside one fixed slot. This keeps
+            // both text lines aligned without reflowing the row as an agent
+            // starts, stops, or asks for approval.
+            ZStack {
+                if let activity = project.activityIndicator {
+                    Text(activity)
                         .font(.system(size: fontSize, design: .monospaced))
-                        // Fits Braille frames and Grok's ⚠ approval glyph.
-                        .frame(width: max(14, fontSize), alignment: .center)
                         .foregroundStyle(isSelected ? .primary : .secondary)
                         .accessibilityHidden(true)
-                    if isRenaming {
-                        TextField("", text: $renameDraft)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: fontSize, weight: .medium))
-                            .focused($renameFocused)
-                            .onSubmit(commitRename)
-                            .onExitCommand { isRenaming = false }
-                            .onChange(of: renameFocused) {
-                                if !renameFocused, isRenaming {
-                                    commitRename()
-                                }
+                } else {
+                    Image(systemName: "folder")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(isSelected ? Color(nsColor: Theme.accent) : .secondary)
+                }
+            }
+            .frame(width: max(14, fontSize), alignment: .center)
+
+            VStack(alignment: .leading, spacing: 1) {
+                if isRenaming {
+                    TextField("", text: $renameDraft)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: fontSize, weight: .medium))
+                        .focused($renameFocused)
+                        .onSubmit(commitRename)
+                        .onExitCommand { isRenaming = false }
+                        .onChange(of: renameFocused) {
+                            if !renameFocused, isRenaming {
+                                commitRename()
                             }
-                    } else {
-                        Text(project.name)
-                            .font(.system(size: fontSize))
-                            .foregroundStyle(isSelected ? .primary : .secondary)
-                            .lineLimit(1)
-                    }
+                        }
+                } else {
+                    Text(project.name)
+                        .font(.system(size: fontSize))
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .lineLimit(1)
                 }
                 subtitle
             }
