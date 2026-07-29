@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A10000000000000000000001 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = A20000000000000000000001 /* SwiftTerm */; };
+		A10000000000000000000001 /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = A20000000000000000000001 /* GhosttyTerminal */; };
 		A10000000000000000000002 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = A20000000000000000000002 /* NIOSSH */; };
 		A10000000000000000000003 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = A20000000000000000000003 /* NIOCore */; };
 		A10000000000000000000004 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = A20000000000000000000004 /* NIOPosix */; };
@@ -16,12 +16,22 @@
 		A10000000000000000000007 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = A20000000000000000000003 /* NIOCore */; };
 		A10000000000000000000008 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = A20000000000000000000004 /* NIOPosix */; };
 		A10000000000000000000009 /* Crypto in Frameworks */ = {isa = PBXBuildFile; productRef = A20000000000000000000005 /* Crypto */; };
+		A1000000000000000000000A /* JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000004 /* JetBrainsMono-Regular.ttf */; };
+		A1000000000000000000000B /* JetBrainsMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000005 /* JetBrainsMono-Bold.ttf */; };
+		A1000000000000000000000C /* JetBrainsMono-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000006 /* JetBrainsMono-Italic.ttf */; };
+		A1000000000000000000000D /* JetBrainsMono-BoldItalic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000007 /* JetBrainsMono-BoldItalic.ttf */; };
+		A1000000000000000000000E /* OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000008 /* OFL.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A30000000000000000000001 /* Kero.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kero.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000002 /* KeroMobileUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KeroMobileUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000003 /* KeroMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KeroMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A30000000000000000000004 /* JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file.ttf; path = "kero/Fonts/JetBrainsMono-Regular.ttf"; sourceTree = "<group>"; };
+		A30000000000000000000005 /* JetBrainsMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file.ttf; path = "kero/Fonts/JetBrainsMono-Bold.ttf"; sourceTree = "<group>"; };
+		A30000000000000000000006 /* JetBrainsMono-Italic.ttf */ = {isa = PBXFileReference; lastKnownFileType = file.ttf; path = "kero/Fonts/JetBrainsMono-Italic.ttf"; sourceTree = "<group>"; };
+		A30000000000000000000007 /* JetBrainsMono-BoldItalic.ttf */ = {isa = PBXFileReference; lastKnownFileType = file.ttf; path = "kero/Fonts/JetBrainsMono-BoldItalic.ttf"; sourceTree = "<group>"; };
+		A30000000000000000000008 /* OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = kero/Fonts/OFL.txt; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -60,7 +70,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000000000000000000001 /* SwiftTerm in Frameworks */,
+				A10000000000000000000001 /* GhosttyTerminal in Frameworks */,
 				A10000000000000000000002 /* NIOSSH in Frameworks */,
 				A10000000000000000000003 /* NIOCore in Frameworks */,
 				A10000000000000000000004 /* NIOPosix in Frameworks */,
@@ -95,6 +105,7 @@
 				A40000000000000000000001 /* KeroMobile */,
 				A40000000000000000000003 /* KeroMobileTests */,
 				A40000000000000000000002 /* KeroMobileUITests */,
+				A60000000000000000000003 /* Bundled Fonts */,
 				A60000000000000000000002 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -107,6 +118,18 @@
 				A30000000000000000000002 /* KeroMobileUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A60000000000000000000003 /* Bundled Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000004 /* JetBrainsMono-Regular.ttf */,
+				A30000000000000000000005 /* JetBrainsMono-Bold.ttf */,
+				A30000000000000000000006 /* JetBrainsMono-Italic.ttf */,
+				A30000000000000000000007 /* JetBrainsMono-BoldItalic.ttf */,
+				A30000000000000000000008 /* OFL.txt */,
+			);
+			name = "Bundled Fonts";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -129,7 +152,7 @@
 			);
 			name = KeroMobile;
 			packageProductDependencies = (
-				A20000000000000000000001 /* SwiftTerm */,
+				A20000000000000000000001 /* GhosttyTerminal */,
 				A20000000000000000000002 /* NIOSSH */,
 				A20000000000000000000003 /* NIOCore */,
 				A20000000000000000000004 /* NIOPosix */,
@@ -239,7 +262,7 @@
 			mainGroup = A60000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				AB0000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				AB0000000000000000000001 /* XCLocalSwiftPackageReference "Vendor/libghostty-spm" */,
 				AB0000000000000000000002 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
 				AB0000000000000000000003 /* XCRemoteSwiftPackageReference "swift-nio" */,
 				AB0000000000000000000004 /* XCRemoteSwiftPackageReference "swift-crypto" */,
@@ -261,6 +284,11 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000000000000000000000A /* JetBrainsMono-Regular.ttf in Resources */,
+				A1000000000000000000000B /* JetBrainsMono-Bold.ttf in Resources */,
+				A1000000000000000000000C /* JetBrainsMono-Italic.ttf in Resources */,
+				A1000000000000000000000D /* JetBrainsMono-BoldItalic.ttf in Resources */,
+				A1000000000000000000000E /* OFL.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -637,15 +665,14 @@
 		};
 /* End PBXTargetDependency section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		AB0000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.15.0;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		AB0000000000000000000001 /* XCLocalSwiftPackageReference "Vendor/libghostty-spm" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "Vendor/libghostty-spm";
 		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
 		AB0000000000000000000002 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/apple/swift-nio-ssh";
@@ -673,10 +700,9 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A20000000000000000000001 /* SwiftTerm */ = {
+		A20000000000000000000001 /* GhosttyTerminal */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = AB0000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
-			productName = SwiftTerm;
+			productName = GhosttyTerminal;
 		};
 		A20000000000000000000002 /* NIOSSH */ = {
 			isa = XCSwiftPackageProductDependency;

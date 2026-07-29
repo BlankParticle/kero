@@ -6,6 +6,7 @@ struct TerminalScreen: View {
     @AppStorage("terminal.fontSize") private var fontSize = 14.0
 
     @ObservedObject var session: TerminalSessionModel
+    @State private var projectPanel: TerminalProjectPanel?
 
     var body: some View {
         ZStack {
@@ -85,10 +86,25 @@ struct TerminalScreen: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text(session.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .layoutPriority(1)
+                    .accessibilityIdentifier("terminal-title")
+            }
+
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button("Show Keyboard", systemImage: "keyboard") {
-                    session.focusTerminal()
+                Button("Files", systemImage: "folder") {
+                    projectPanel = .files
                 }
+                .accessibilityIdentifier("terminal-files")
+
+                Button("Git", systemImage: "arrow.triangle.branch") {
+                    projectPanel = .git
+                }
+                .accessibilityIdentifier("terminal-git")
 
                 Menu {
                     Button("Reconnect", systemImage: "arrow.clockwise") {
@@ -114,6 +130,14 @@ struct TerminalScreen: View {
                         + "\(session.host.username)@\(session.host.endpoint)"
                 )
             }
+        }
+        .sheet(item: $projectPanel) { panel in
+            TerminalProjectSheet(
+                session: session,
+                initialPanel: panel
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $session.hostKeyPrompt) { prompt in
             HostKeyTrustView(
@@ -159,8 +183,17 @@ private struct TerminalRepresentable: UIViewRepresentable {
     func makeUIView(context: Context) -> KeroTerminalView {
         let view = session.terminalView
         view.setFontSize(CGFloat(fontSize))
-        DispatchQueue.main.async {
-            _ = view.becomeFirstResponder()
+        #if DEBUG
+        let shouldFocus = !ProcessInfo.processInfo.arguments.contains(
+            "-ui-testing-no-keyboard"
+        )
+        #else
+        let shouldFocus = true
+        #endif
+        if shouldFocus {
+            DispatchQueue.main.async {
+                _ = view.becomeFirstResponder()
+            }
         }
         return view
     }
@@ -172,6 +205,10 @@ private struct TerminalRepresentable: UIViewRepresentable {
 
 private struct TerminalKeysBar: View {
     @ObservedObject var session: TerminalSessionModel
+    @State private var scrollEdges = KeyScrollEdges(
+        canScrollLeading: false,
+        canScrollTrailing: true
+    )
 
     private let keys: [TerminalKey] = [
         TerminalKey(label: "Esc", accessibilityLabel: "Escape", bytes: [0x1b]),
@@ -187,36 +224,106 @@ private struct TerminalKeysBar: View {
     ]
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 7) {
-                ForEach(keys) { key in
-                    Button {
-                        session.send(bytes: key.bytes)
-                    } label: {
-                        Text(key.label)
-                            .font(.system(.subheadline, design: .monospaced, weight: .semibold))
-                            .frame(minWidth: 44, minHeight: 44)
-                            .padding(.horizontal, 4)
-                            .contentShape(Rectangle())
+        HStack(spacing: 7) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 7) {
+                    ForEach(keys) { key in
+                        Button {
+                            session.send(bytes: key.bytes)
+                        } label: {
+                            Text(key.label)
+                                .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                                .frame(minWidth: 44, minHeight: 44)
+                                .padding(.horizontal, 4)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .background(
+                            Color.white.opacity(0.12),
+                            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        )
+                        .accessibilityLabel(key.accessibilityLabel)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white)
-                    .background(
-                        Color.white.opacity(0.12),
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    )
-                    .accessibilityLabel(key.accessibilityLabel)
                 }
+                .padding(.leading, 10)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .scrollIndicators(.hidden)
+            .onScrollGeometryChange(for: KeyScrollEdges.self) { geometry in
+                let minimumOffset = -geometry.contentInsets.leading
+                let maximumOffset = max(
+                    minimumOffset,
+                    geometry.contentSize.width
+                        - geometry.containerSize.width
+                        + geometry.contentInsets.trailing
+                )
+
+                return KeyScrollEdges(
+                    canScrollLeading:
+                        geometry.contentOffset.x > minimumOffset + 0.5,
+                    canScrollTrailing:
+                        geometry.contentOffset.x < maximumOffset - 0.5
+                )
+            } action: { _, newEdges in
+                scrollEdges = newEdges
+            }
+            .mask {
+                HStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [
+                            scrollEdges.canScrollLeading ? .clear : .black,
+                            .black,
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 22)
+
+                    Color.black
+
+                    LinearGradient(
+                        colors: [
+                            .black,
+                            scrollEdges.canScrollTrailing ? .clear : .black,
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 22)
+                }
+                .animation(.easeOut(duration: 0.14), value: scrollEdges)
+            }
+            .accessibilityIdentifier("terminal-key-scroll")
+
+            Button {
+                session.focusTerminal()
+            } label: {
+                Image(systemName: "keyboard")
+                    .font(.body.weight(.medium))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .background(
+                Color.white.opacity(0.12),
+                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+            )
+            .accessibilityLabel("Show Keyboard")
+            .accessibilityIdentifier("terminal-keyboard")
+            .padding(.trailing, 10)
         }
-        .scrollIndicators(.hidden)
+        .padding(.vertical, 8)
         .background(.black.opacity(0.96))
         .overlay(alignment: .top) {
             Divider().overlay(Color.white.opacity(0.16))
         }
     }
+}
+
+private struct KeyScrollEdges: Equatable {
+    let canScrollLeading: Bool
+    let canScrollTrailing: Bool
 }
 
 private struct TerminalKey: Identifiable {

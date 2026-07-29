@@ -125,6 +125,54 @@ final class KeroMobileUITests: XCTestCase {
         assertSessionConnected()
     }
 
+    func testExistingSimulatorSSHFilesPanel() throws {
+        guard ProcessInfo.processInfo.environment[
+            "KERO_EXISTING_SIMULATOR_FILES_TEST"
+        ] == "1" else {
+            throw XCTSkip(
+                "Run only when explicitly testing an existing Simulator host."
+            )
+        }
+
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Hosts"].waitForExistence(timeout: 5))
+        let host = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS '@'")
+        ).firstMatch
+        XCTAssertTrue(host.waitForExistence(timeout: 3))
+        host.tap()
+
+        XCTAssertTrue(
+            app.textViews["ssh-terminal"].waitForExistence(timeout: 10)
+        )
+        let filesButton = app.buttons["terminal-files"]
+        XCTAssertTrue(filesButton.waitForExistence(timeout: 3))
+        filesButton.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["remote-project-root"]
+                .waitForExistence(timeout: 10)
+        )
+        XCTAssertFalse(app.staticTexts["Couldn’t Load Files"].exists)
+        XCTAssertFalse(
+            app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS 'Unsupported use of'")
+            ).firstMatch.exists
+        )
+        capture("Live Fish Files Panel")
+
+        app.segmentedControls.buttons["Git"].tap()
+        XCTAssertTrue(
+            app.staticTexts["No Git Repository"].waitForExistence(timeout: 10)
+        )
+        XCTAssertTrue(app.buttons["initialize-git-repository"].exists)
+        XCTAssertFalse(app.staticTexts["Couldn’t Load Git"].exists)
+        capture("Live Fish Git Initialization")
+    }
+
     func testHostKeyAndSettingsWorkflow() throws {
         XCTAssertTrue(app.navigationBars["Hosts"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["No Hosts"].exists)
@@ -319,6 +367,7 @@ final class KeroMobileUITests: XCTestCase {
         app.launchArguments = [
             "-ui-testing",
             "-ui-testing-single-active-session",
+            "-ui-testing-no-keyboard",
         ]
         app.launch()
 
@@ -330,6 +379,22 @@ final class KeroMobileUITests: XCTestCase {
             connectionAlert.buttons["OK"].tap()
         }
 
+        let title = app.staticTexts["terminal-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 3))
+        XCTAssertEqual(title.label, "[Build Server] ~")
+        XCTAssertTrue(app.buttons["terminal-files"].exists)
+        XCTAssertTrue(app.buttons["terminal-git"].exists)
+        let keyboard = app.buttons["terminal-keyboard"]
+        XCTAssertTrue(keyboard.exists)
+        XCTAssertGreaterThan(keyboard.frame.minY, title.frame.maxY)
+        capture("Terminal Header")
+
+        let keyScroll = app.scrollViews["terminal-key-scroll"]
+        XCTAssertTrue(keyScroll.exists)
+        keyScroll.swipeLeft()
+        XCTAssertTrue(app.buttons["End"].isHittable)
+        capture("Terminal Keys Scrolled")
+
         let menu = app.buttons["Session actions"]
         XCTAssertTrue(menu.waitForExistence(timeout: 3))
         menu.tap()
@@ -340,6 +405,111 @@ final class KeroMobileUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Server"].exists)
         XCTAssertFalse(app.staticTexts["builder@192.0.2.10"].exists)
         capture("Session Actions Menu")
+    }
+
+    func testGhosttySessionSurvivesBackNavigation() {
+        app.terminate()
+        app.launchArguments = [
+            "-ui-testing",
+            "-ui-testing-single-active-session",
+            "-ui-testing-no-keyboard",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Hosts"].waitForExistence(timeout: 5))
+        app.buttons["active-session-card"].tap()
+        dismissMissingFixtureCredential()
+
+        let terminal = app.textViews["ssh-terminal"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Escape"].exists)
+        XCTAssertTrue(
+            (terminal.value as? String)?.contains("Last login:") == true
+        )
+
+        app.navigationBars.buttons["Hosts"].tap()
+        let activeSession = app.buttons["active-session-card"]
+        XCTAssertTrue(activeSession.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["close-active-session"].exists)
+
+        activeSession.tap()
+        dismissMissingFixtureCredential()
+        let restoredTerminal = app.textViews["ssh-terminal"]
+        XCTAssertTrue(restoredTerminal.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            (restoredTerminal.value as? String)?.contains("Last login:") == true
+        )
+        XCTAssertTrue(app.staticTexts["terminal-title"].exists)
+        capture("Ghostty Session Restored")
+    }
+
+    func testTerminalFilesAndGitPanels() {
+        app.terminate()
+        app.launchArguments = [
+            "-ui-testing",
+            "-ui-testing-project-panels",
+            "-ui-testing-no-keyboard",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Hosts"].waitForExistence(timeout: 5))
+        app.buttons["active-session-card"].tap()
+
+        let connectionAlert = app.alerts["Couldn’t connect"]
+        if connectionAlert.waitForExistence(timeout: 3) {
+            connectionAlert.buttons["OK"].tap()
+        }
+
+        let filesButton = app.buttons["terminal-files"]
+        let gitButton = app.buttons["terminal-git"]
+        XCTAssertTrue(filesButton.waitForExistence(timeout: 3))
+        XCTAssertTrue(gitButton.exists)
+
+        filesButton.tap()
+        XCTAssertTrue(app.navigationBars["kero"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Sources"].exists)
+        XCTAssertTrue(app.staticTexts["Package.swift"].exists)
+        XCTAssertTrue(app.staticTexts["README.md"].exists)
+        capture("Remote Files Panel")
+
+        app.segmentedControls.buttons["Git"].tap()
+        XCTAssertTrue(app.staticTexts["main"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["origin/main"].exists)
+        XCTAssertTrue(app.staticTexts["Staged"].exists)
+        XCTAssertTrue(app.staticTexts["Changes"].exists)
+        XCTAssertTrue(app.staticTexts["App.swift"].exists)
+        XCTAssertTrue(app.staticTexts["Sources"].exists)
+        capture("Remote Git Panel")
+    }
+
+    func testTerminalOffersRepositoryInitialization() {
+        app.terminate()
+        app.launchArguments = [
+            "-ui-testing",
+            "-ui-testing-project-panels",
+            "-ui-testing-project-no-repository",
+            "-ui-testing-no-keyboard",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Hosts"].waitForExistence(timeout: 5))
+        app.buttons["active-session-card"].tap()
+
+        let connectionAlert = app.alerts["Couldn’t connect"]
+        if connectionAlert.waitForExistence(timeout: 3) {
+            connectionAlert.buttons["OK"].tap()
+        }
+
+        let gitButton = app.buttons["terminal-git"]
+        XCTAssertTrue(gitButton.waitForExistence(timeout: 3))
+        gitButton.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["No Git Repository"].waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["initialize-git-repository"].exists)
+        XCTAssertFalse(app.staticTexts["Couldn’t Load Git"].exists)
+        capture("Initialize Remote Git Repository")
     }
 
     private func tapTab(_ name: String) {
@@ -385,5 +555,12 @@ final class KeroMobileUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private func dismissMissingFixtureCredential() {
+        let alert = app.alerts["Couldn’t connect"]
+        if alert.waitForExistence(timeout: 3) {
+            alert.buttons["OK"].tap()
+        }
     }
 }

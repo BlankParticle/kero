@@ -1,108 +1,206 @@
-import SwiftTerm
+import GhosttyTerminal
 import UIKit
 
-final class KeroTerminalView: TerminalView, TerminalViewDelegate {
+private final class TerminalTransportBridge: @unchecked Sendable {
+    private let lock = NSLock()
+    private weak var connection: SSHConnection?
+    private var lastSize = SSHWindowSize(
+        columns: 80,
+        rows: 24,
+        pixelWidth: 0,
+        pixelHeight: 0
+    )
+
+    func attach(_ connection: SSHConnection) {
+        lock.lock()
+        self.connection = connection
+        lock.unlock()
+    }
+
+    func detach(_ expectedConnection: SSHConnection) {
+        lock.lock()
+        if connection === expectedConnection {
+            connection = nil
+        }
+        lock.unlock()
+    }
+
+    func send(_ data: Data) {
+        lock.lock()
+        let connection = connection
+        lock.unlock()
+        connection?.send(data)
+    }
+
+    func resize(_ viewport: InMemoryTerminalViewport) {
+        let size = SSHWindowSize(
+            columns: max(Int(viewport.columns), 1),
+            rows: max(Int(viewport.rows), 1),
+            pixelWidth: Int(viewport.widthPixels),
+            pixelHeight: Int(viewport.heightPixels)
+        )
+        lock.lock()
+        lastSize = size
+        let connection = connection
+        lock.unlock()
+        connection?.resize(size)
+    }
+
+    var windowSize: SSHWindowSize {
+        lock.lock()
+        let size = lastSize
+        lock.unlock()
+        return size
+    }
+}
+
+@MainActor
+final class KeroTerminalView: UITerminalView,
+    TerminalSurfaceTitleDelegate,
+    TerminalSurfaceBellDelegate,
+    TerminalSurfacePwdDelegate,
+    TerminalSurfaceOpenURLDelegate
+{
     weak var session: TerminalSessionModel?
 
-    private var lastSize: CGSize = .zero
-    private var metalSetupAttempted = false
+    private static let defaultFontSize: Float = 14
+    private static let maximumCachedOutputBytes = 64 * 1_024
+
+    private let transportBridge: TerminalTransportBridge
+    private let terminalSession: InMemoryTerminalSession
+    private let ghosttyController: TerminalController
+    private var cachedOutput = Data()
+    private(set) var configuredFontSize = CGFloat(defaultFontSize)
 
     override init(frame: CGRect) {
+        let transportBridge = TerminalTransportBridge()
+        self.transportBridge = transportBridge
+        self.terminalSession = InMemoryTerminalSession(
+            write: { [weak transportBridge] data in
+                transportBridge?.send(data)
+            },
+            resize: { [weak transportBridge] viewport in
+                transportBridge?.resize(viewport)
+            }
+        )
+        self.ghosttyController = TerminalController(
+            configuration: Self.terminalConfiguration,
+            theme: Self.terminalTheme
+        )
         super.init(frame: frame)
         configure()
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        configure()
-    }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        guard window != nil, !metalSetupAttempted else {
-            return
-        }
-        metalSetupAttempted = true
-        try? setUseMetal(true)
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        guard bounds.size != lastSize,
-              bounds.width > 0,
-              bounds.height > 0 else {
-            return
-        }
-        lastSize = bounds.size
-        let terminal = getTerminal()
-        session?.resize(
-            columns: terminal.cols,
-            rows: terminal.rows,
-            viewSize: bounds.size,
-            scale: window?.screen.scale ?? UIScreen.main.scale
-        )
+        fatalError("init(coder:) has not been implemented")
     }
 
     private func configure() {
-        terminalDelegate = self
         backgroundColor = .black
-        nativeBackgroundColor = .black
-        nativeForegroundColor = UIColor(
-            red: 0.86,
-            green: 0.89,
-            blue: 0.87,
-            alpha: 1
+        isOpaque = true
+        delegate = self
+        controller = ghosttyController
+        configuration = TerminalSurfaceOptions(
+            backend: .inMemory(terminalSession),
+            fontSize: Self.defaultFontSize
         )
-        caretColor = UIColor(
-            red: 0.45,
-            green: 0.82,
-            blue: 0.62,
-            alpha: 1
-        )
-        selectedTextBackgroundColor = UIColor.systemGreen.withAlphaComponent(0.32)
-        keyboardAppearance = .dark
-        linkReporting = .implicit
-        linkHighlightMode = .always
-        // Kero owns the persistent touch-key row below the terminal. SwiftTerm's
-        // keyboard accessory would otherwise duplicate those controls.
-        inputAccessoryView = nil
+        // Kero owns the persistent touch-key row below the terminal.
+        inputAccessoryItems = []
         accessibilityLabel = "SSH terminal"
+        accessibilityIdentifier = "ssh-terminal"
+    }
+
+    func attachConnection(_ connection: SSHConnection) {
+        transportBridge.attach(connection)
+    }
+
+    func detachConnection(_ connection: SSHConnection) {
+        transportBridge.detach(connection)
+    }
+
+    var windowSize: SSHWindowSize {
+        let current = transportBridge.windowSize
+        let scale = window?.screen.nativeScale ?? UIScreen.main.nativeScale
+        return SSHWindowSize(
+            columns: max(current.columns, 1),
+            rows: max(current.rows, 1),
+            pixelWidth: current.pixelWidth > 0
+                ? current.pixelWidth
+                : Int((bounds.width * scale).rounded(.down)),
+            pixelHeight: current.pixelHeight > 0
+                ? current.pixelHeight
+                : Int((bounds.height * scale).rounded(.down))
+        )
+    }
+
+    var renderedTerminalConfiguration: String {
+        ghosttyController.renderedConfig
     }
 
     func setFontSize(_ size: CGFloat) {
-        guard abs(font.pointSize - size) > 0.1 else {
+        let resolved = min(max(size, 4), 64)
+        guard abs(configuredFontSize - resolved) > 0.01 else {
             return
         }
-        font = UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        configuredFontSize = resolved
+        setTerminalFontSize(Float(resolved))
     }
 
-    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        session?.resize(
-            columns: newCols,
-            rows: newRows,
-            viewSize: bounds.size,
-            scale: window?.screen.scale ?? UIScreen.main.scale
-        )
+    func receive(_ data: Data) {
+        guard !data.isEmpty else {
+            return
+        }
+        cachedOutput.append(data)
+        if cachedOutput.count > Self.maximumCachedOutputBytes {
+            cachedOutput.removeFirst(
+                cachedOutput.count - Self.maximumCachedOutputBytes
+            )
+        }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing") {
+            accessibilityValue = String(decoding: cachedOutput, as: UTF8.self)
+        }
+        #endif
+        terminalSession.receive(data)
     }
 
-    func setTerminalTitle(source: TerminalView, title: String) {
+    func receive(_ text: String) {
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\n", with: "\r\n")
+        receive(Data(normalized.utf8))
+    }
+
+    func sendInput(_ data: Data) {
+        terminalSession.sendInput(data)
+    }
+
+    func viewportText() -> String {
+        if let viewport = terminalSession.readViewportText(),
+           !viewport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return viewport
+        }
+        return String(decoding: cachedOutput, as: UTF8.self)
+    }
+
+    func terminalDidChangeTitle(_ title: String) {
         session?.updateTitle(title)
     }
 
-    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-
-    func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        session?.send(Data(data))
+    func terminalDidRingBell() {
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
     }
 
-    func scrolled(source: TerminalView, position: Double) {}
+    func terminalDidChangeWorkingDirectory(_ path: String) {
+        session?.updateWorkingDirectory(path)
+    }
 
-    func requestOpenLink(
-        source: TerminalView,
-        link: String,
-        params: [String: String]
+    func terminalDidRequestOpenURL(
+        _ urlString: String,
+        kind _: TerminalOpenURLKind
     ) {
-        guard let url = URL(string: link),
+        guard let url = URL(string: urlString),
               let scheme = url.scheme?.lowercased(),
               ["http", "https", "mailto"].contains(scheme) else {
             return
@@ -110,23 +208,33 @@ final class KeroTerminalView: TerminalView, TerminalViewDelegate {
         UIApplication.shared.open(url)
     }
 
-    func bell(source: TerminalView) {
-        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+    private static let terminalConfiguration = TerminalConfiguration(
+        startingFrom: .default
+    ) { builder in
+        builder.withFontFamily("JetBrains Mono")
+        builder.withFontSize(defaultFontSize)
+        builder.withFontThicken(false)
+        builder.withCursorStyle(.block)
+        builder.withCursorStyleBlink(true)
+        builder.withWindowPaddingX(0)
+        builder.withWindowPaddingY(0)
+        builder.withCustom("term", "xterm-256color")
+        builder.withCustom("shell-integration", "none")
+        builder.withCustom("scrollback-limit", "4194304")
+        builder.withCustom("clipboard-read", "deny")
+        builder.withCustom("clipboard-write", "allow")
+        builder.withCustom("clipboard-paste-protection", "true")
     }
 
-    func clipboardCopy(source: TerminalView, content: Data) {
-        guard let text = String(data: content, encoding: .utf8) else {
-            return
+    private static let terminalTheme: TerminalTheme = {
+        let colors = TerminalConfiguration(startingFrom: .afterglow) {
+            builder in
+            builder.withBackground("000000")
+            builder.withForeground("DBE3DE")
+            builder.withCursorColor("73D19E")
+            builder.withSelectionBackground("245A40")
+            builder.withSelectionForeground("FFFFFF")
         }
-        UIPasteboard.general.string = text
-    }
-
-    func clipboardRead(source: TerminalView) -> Data? {
-        // A remote process must not silently read the local clipboard.
-        nil
-    }
-
-    func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
-
-    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+        return TerminalTheme(light: colors, dark: colors)
+    }()
 }

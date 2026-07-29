@@ -1,5 +1,4 @@
 import Foundation
-import SwiftTerm
 import UIKit
 
 @MainActor
@@ -14,6 +13,12 @@ final class TerminalSessionModel: ObservableObject, Identifiable {
     let id = UUID()
     let host: SSHHost
     let terminalView: KeroTerminalView
+    lazy var remoteProject = RemoteProjectModel { [weak self] command in
+        guard let self else {
+            throw SSHCommandError.notConnected
+        }
+        return try await self.executeRemoteCommand(command)
+    }
 
     private let hostStore: HostStore
     private let identityStore: IdentityStore
@@ -151,14 +156,7 @@ final class TerminalSessionModel: ObservableObject, Identifiable {
         credential: SSHCredential,
         connectionID: UUID
     ) {
-        let terminal = terminalView.getTerminal()
-        let scale = terminalView.window?.screen.scale ?? UIScreen.main.scale
-        let size = SSHWindowSize(
-            columns: max(terminal.cols, 1),
-            rows: max(terminal.rows, 1),
-            pixelWidth: Int(terminalView.bounds.width * scale),
-            pixelHeight: Int(terminalView.bounds.height * scale)
-        )
+        let size = terminalView.windowSize
         let configuration = SSHConnectionConfiguration(
             host: host,
             credential: credential,
@@ -187,12 +185,13 @@ final class TerminalSessionModel: ObservableObject, Identifiable {
             }
         )
         self.connection = connection
+        terminalView.attachConnection(connection)
         connection.connect()
     }
 
     func reconnect() {
         disconnect()
-        terminalView.feed(text: "\r\n[Kero] Reconnecting…\r\n")
+        terminalView.receive("\r\n[Kero] Reconnecting…\r\n")
         connect()
     }
 
@@ -202,7 +201,10 @@ final class TerminalSessionModel: ObservableObject, Identifiable {
         credentialTask?.cancel()
         credentialTask = nil
         isUnlockingCredential = false
-        connection?.disconnect()
+        if let connection {
+            terminalView.detachConnection(connection)
+            connection.disconnect()
+        }
         connection = nil
         if state != .idle {
             state = .disconnected
@@ -217,7 +219,10 @@ final class TerminalSessionModel: ObservableObject, Identifiable {
         credentialTask?.cancel()
         credentialTask = nil
         isUnlockingCredential = false
-        connection?.disconnect()
+        if let connection {
+            terminalView.detachConnection(connection)
+            connection.disconnect()
+        }
         connection = nil
         if state != .idle {
             state = .disconnected
@@ -233,7 +238,7 @@ final class TerminalSessionModel: ObservableObject, Identifiable {
     }
 
     func send(_ data: Data) {
-        connection?.send(data)
+        terminalView.sendInput(data)
     }
 
     func send(bytes: [UInt8]) {
@@ -241,29 +246,18 @@ final class TerminalSessionModel: ObservableObject, Identifiable {
         _ = terminalView.becomeFirstResponder()
     }
 
-    func resize(columns: Int, rows: Int, viewSize: CGSize, scale: CGFloat) {
-        connection?.resize(
-            SSHWindowSize(
-                columns: columns,
-                rows: rows,
-                pixelWidth: Int(viewSize.width * scale),
-                pixelHeight: Int(viewSize.height * scale)
-            )
-        )
-    }
-
     func focusTerminal() {
         _ = terminalView.becomeFirstResponder()
     }
 
+    func updateWorkingDirectory(_ directory: String?) {
+        remoteProject.setWorkingDirectory(directory)
+    }
+
     func captureThumbnail() {
-        let terminal = terminalView.getTerminal()
-        let lines = (0..<terminal.rows).compactMap { row in
-            terminal.getLine(row: row)?.translateToString(
-                trimRight: true,
-                skipNullCellsFollowingWide: true
-            )
-        }
+        let lines = terminalView.viewportText()
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
         guard let firstContentIndex = lines.firstIndex(where: {
             !$0.trimmingCharacters(in: .whitespaces).isEmpty
         }),
@@ -274,10 +268,7 @@ final class TerminalSessionModel: ObservableObject, Identifiable {
         }
 
         let imageSize = CGSize(width: 320, height: 180)
-        let font = UIFont.monospacedSystemFont(
-            ofSize: 9,
-            weight: .regular
-        )
+        let font = MobileTerminalFont.regular(ofSize: 9)
         let maximumLineCount = max(
             Int((imageSize.height - 16) / font.lineHeight),
             1
@@ -384,13 +375,38 @@ final class TerminalSessionModel: ObservableObject, Identifiable {
         switch newState {
         case .connected:
             hostStore.markConnected(host.id)
+            Task { [weak self] in
+                await self?.remoteProject.discoverInitialDirectory()
+            }
         case .failed(let message):
+            if let connection {
+                terminalView.detachConnection(connection)
+                self.connection = nil
+            }
             alert = TerminalSessionAlert(
                 title: "SSH connection failed",
                 message: message
             )
+        case .disconnected:
+            if let connection {
+                terminalView.detachConnection(connection)
+                self.connection = nil
+            }
         default:
             break
+        }
+    }
+
+    private func executeRemoteCommand(
+        _ command: String
+    ) async throws -> SSHCommandResult {
+        guard state == .connected, let connection else {
+            throw SSHCommandError.notConnected
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            connection.execute(command: command) {
+                continuation.resume(with: $0)
+            }
         }
     }
 }

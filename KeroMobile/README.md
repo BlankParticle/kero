@@ -9,7 +9,7 @@ iPhone and iPad; it does not build against or share runtime code with the macOS 
 - Password and generated Ed25519 key authentication
 - Device-only Keychain storage with optional Face ID or passcode protection
 - Trust-on-first-use host-key verification and changed-key warnings
-- SwiftTerm terminal with touch controls, Unicode input, links, and hardware keyboards
+- Ghostty terminal with touch scrolling, Unicode input, links, selection, and hardware keyboards
 - Optional `tmux new-session -A -s kero` startup for resumable remote work
 
 Kero is deliberately an interactive SSH terminal. File transfer, Mosh transport,
@@ -21,6 +21,10 @@ resume remote work.
 
 Open `KeroMobile.xcodeproj`, select the `KeroMobile` scheme, then run on an iOS 18 or newer
 device or simulator. Package dependencies resolve through Swift Package Manager.
+
+Use Xcode's normal signed Run or Test action for runnable builds. An artifact built with
+`CODE_SIGNING_ALLOWED=NO` can compile, but must not be installed: it lacks the simulated
+application identifier that the iOS Keychain requires.
 
 The `KeroMobileTests` target includes persistence, Keychain, host-key, key-generation,
 and loopback SSH transport coverage. `KeroMobileUITests` exercises the primary

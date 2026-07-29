@@ -5,9 +5,19 @@ struct OpenSourceNoticesView: View {
         List {
             Section {
                 package(
-                    "SwiftTerm",
-                    detail: "Terminal emulation · MIT License",
-                    url: "https://github.com/migueldeicaza/SwiftTerm"
+                    "Ghostty",
+                    detail: "Terminal emulation and rendering · MIT License",
+                    url: "https://github.com/ghostty-org/ghostty"
+                )
+                package(
+                    "libghostty-spm",
+                    detail: "Swift and UIKit integration · MIT License",
+                    url: "https://github.com/egoist-labs/libghostty-spm"
+                )
+                package(
+                    "MSDisplayLink",
+                    detail: "Display scheduling · MIT License",
+                    url: "https://github.com/Lakr233/MSDisplayLink"
                 )
                 package(
                     "SwiftNIO SSH",
@@ -39,6 +49,11 @@ struct OpenSourceNoticesView: View {
                     detail: "System interfaces · Apache License 2.0",
                     url: "https://github.com/apple/swift-system"
                 )
+                package(
+                    "JetBrains Mono",
+                    detail: "Terminal font · SIL Open Font License 1.1",
+                    url: "https://github.com/JetBrains/JetBrainsMono"
+                )
             } footer: {
                 Text(
                     "Kero is grateful to the authors and contributors of these "
@@ -47,10 +62,10 @@ struct OpenSourceNoticesView: View {
             }
 
             Section {
-                NavigationLink("SwiftTerm · MIT License") {
+                NavigationLink("Ghostty components · MIT License") {
                     BundledLicenseView(
                         title: "MIT License",
-                        resource: "SwiftTerm-MIT"
+                        resource: "Ghostty-MIT"
                     )
                 }
                 NavigationLink("SwiftNIO · Apache License 2.0") {
@@ -63,6 +78,12 @@ struct OpenSourceNoticesView: View {
                     BundledLicenseView(
                         title: "Third-Party Notices",
                         resource: "Third-Party-NOTICES"
+                    )
+                }
+                NavigationLink("JetBrains Mono · SIL OFL 1.1") {
+                    BundledLicenseView(
+                        title: "SIL Open Font License 1.1",
+                        resource: "OFL"
                     )
                 }
             } header: {

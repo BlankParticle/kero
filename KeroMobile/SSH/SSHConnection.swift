@@ -31,6 +31,43 @@ enum SSHConnectionState: Equatable {
     case failed(String)
 }
 
+struct SSHCommandResult: Equatable, Sendable {
+    let stdout: Data
+    let stderr: Data
+    let exitStatus: Int
+
+    var stdoutString: String {
+        String(decoding: stdout, as: UTF8.self)
+    }
+
+    var stderrString: String {
+        String(decoding: stderr, as: UTF8.self)
+    }
+}
+
+enum SSHCommandError: LocalizedError {
+    case notConnected
+    case requestRejected
+    case terminated(signal: String)
+    case channelClosed
+    case outputTooLarge
+
+    var errorDescription: String? {
+        switch self {
+        case .notConnected:
+            "Connect to the server before loading project information."
+        case .requestRejected:
+            "The SSH server rejected the remote command."
+        case .terminated(let signal):
+            "The remote command was terminated by \(signal)."
+        case .channelClosed:
+            "The remote command channel closed before returning a result."
+        case .outputTooLarge:
+            "The remote command returned too much data."
+        }
+    }
+}
+
 enum SSHClientError: LocalizedError {
     case authenticationMethodUnavailable
     case authenticationRejected
@@ -210,6 +247,7 @@ private final class TerminalOutputPump {
         }
     }
 
+    @MainActor
     private func drain() {
         var bytes: [UInt8]
         let hasMore: Bool
@@ -229,7 +267,7 @@ private final class TerminalOutputPump {
         lock.unlock()
 
         if !bytes.isEmpty {
-            terminalView?.feed(byteArray: bytes[...])
+            terminalView?.receive(Data(bytes))
         }
         if hasMore {
             DispatchQueue.main.async { [weak self] in
@@ -360,6 +398,123 @@ private final class SSHShellChannelHandler: ChannelInboundHandler {
     }
 }
 
+private final class SSHExecChannelHandler: ChannelInboundHandler {
+    typealias InboundIn = SSHChannelData
+
+    private static let maximumOutputBytes = 4 * 1_024 * 1_024
+
+    private let command: String
+    private var stdout = Data()
+    private var stderr = Data()
+    private var completion: ((Result<SSHCommandResult, Error>) -> Void)?
+
+    init(
+        command: String,
+        completion: @escaping (Result<SSHCommandResult, Error>) -> Void
+    ) {
+        self.command = command
+        self.completion = completion
+    }
+
+    func handlerAdded(context: ChannelHandlerContext) {
+        context.channel.setOption(
+            ChannelOptions.allowRemoteHalfClosure,
+            value: true
+        ).whenFailure { [weak self] error in
+            self?.finish(.failure(error), context: context)
+        }
+    }
+
+    func channelActive(context: ChannelHandlerContext) {
+        let requestPromise = context.eventLoop.makePromise(of: Void.self)
+        context.triggerUserOutboundEvent(
+            SSHChannelRequestEvent.ExecRequest(
+                command: command,
+                wantReply: true
+            ),
+            promise: requestPromise
+        )
+        requestPromise.futureResult.whenFailure { [weak self] _ in
+            self?.finish(
+                .failure(SSHCommandError.requestRejected),
+                context: context
+            )
+        }
+    }
+
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        let payload = unwrapInboundIn(data)
+        guard case .byteBuffer(var buffer) = payload.data,
+              let bytes = buffer.readBytes(length: buffer.readableBytes) else {
+            return
+        }
+
+        switch payload.type {
+        case .channel:
+            stdout.append(contentsOf: bytes)
+        case .stdErr:
+            stderr.append(contentsOf: bytes)
+        default:
+            return
+        }
+
+        if stdout.count + stderr.count > Self.maximumOutputBytes {
+            finish(.failure(SSHCommandError.outputTooLarge), context: context)
+        }
+    }
+
+    func userInboundEventTriggered(
+        context: ChannelHandlerContext,
+        event: Any
+    ) {
+        switch event {
+        case let status as SSHChannelRequestEvent.ExitStatus:
+            finish(
+                .success(
+                    SSHCommandResult(
+                        stdout: stdout,
+                        stderr: stderr,
+                        exitStatus: status.exitStatus
+                    )
+                ),
+                context: context
+            )
+        case let signal as SSHChannelRequestEvent.ExitSignal:
+            finish(
+                .failure(
+                    SSHCommandError.terminated(signal: signal.signalName)
+                ),
+                context: context
+            )
+        default:
+            context.fireUserInboundEventTriggered(event)
+        }
+    }
+
+    func channelInactive(context: ChannelHandlerContext) {
+        finish(.failure(SSHCommandError.channelClosed), context: context)
+        context.fireChannelInactive()
+    }
+
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        finish(.failure(error), context: context)
+    }
+
+    private func finish(
+        _ result: Result<SSHCommandResult, Error>,
+        context: ChannelHandlerContext
+    ) {
+        guard let completion else {
+            return
+        }
+        self.completion = nil
+        DispatchQueue.main.async {
+            completion(result)
+        }
+        context.close(promise: nil)
+    }
+}
+
 final class SSHConnection {
     private enum TerminationReason {
         case user
@@ -367,7 +522,6 @@ final class SSHConnection {
         case remote
     }
 
-    private weak var terminalView: KeroTerminalView?
     private let configuration: SSHConnectionConfiguration
     private let validateHostKey: SSHHostKeyValidator
     private let onStateChange: (SSHConnectionState) -> Void
@@ -388,7 +542,6 @@ final class SSHConnection {
         connectionTimeout: TimeAmount = .seconds(30),
         onStateChange: @escaping (SSHConnectionState) -> Void
     ) {
-        self.terminalView = terminalView
         self.configuration = configuration
         self.validateHostKey = validateHostKey
         self.connectionTimeout = connectionTimeout
@@ -507,6 +660,52 @@ final class SSHConnection {
         }
     }
 
+    func execute(
+        command: String,
+        completion: @escaping (Result<SSHCommandResult, Error>) -> Void
+    ) {
+        guard !command.isEmpty,
+              let channel = currentTransportChannel() else {
+            DispatchQueue.main.async {
+                completion(.failure(SSHCommandError.notConnected))
+            }
+            return
+        }
+
+        channel.pipeline.handler(type: NIOSSHHandler.self).whenComplete {
+            result in
+            switch result {
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            case .success(let sshHandler):
+                let promise = channel.eventLoop.makePromise(of: Channel.self)
+                sshHandler.createChannel(
+                    promise,
+                    channelType: .session
+                ) { childChannel, channelType in
+                    guard channelType == .session else {
+                        return childChannel.eventLoop.makeFailedFuture(
+                            SSHClientError.invalidChannelType
+                        )
+                    }
+                    return childChannel.pipeline.addHandler(
+                        SSHExecChannelHandler(
+                            command: command,
+                            completion: completion
+                        )
+                    )
+                }
+                promise.futureResult.whenFailure { error in
+                    DispatchQueue.main.async {
+                        completion(.failure(error))
+                    }
+                }
+            }
+        }
+    }
+
     func disconnect() {
         guard beginTermination(.user) else {
             return
@@ -585,21 +784,7 @@ final class SSHConnection {
     }
 
     private func sendInitialResize() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let terminalView else {
-                return
-            }
-            let terminal = terminalView.getTerminal()
-            let scale = terminalView.window?.screen.scale ?? 1
-            self.resize(
-                SSHWindowSize(
-                    columns: terminal.cols,
-                    rows: terminal.rows,
-                    pixelWidth: Int(terminalView.bounds.width * scale),
-                    pixelHeight: Int(terminalView.bounds.height * scale)
-                )
-            )
-        }
+        resize(configuration.initialSize)
     }
 
     private func handleFailure(_ error: Error) {
@@ -737,6 +922,15 @@ final class SSHConnection {
             return nil
         }
         return sessionChannel
+    }
+
+    private func currentTransportChannel() -> Channel? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard terminationReason == nil else {
+            return nil
+        }
+        return channel
     }
 
     private func notify(_ state: SSHConnectionState) {

@@ -49,6 +49,168 @@ final class KeroMobileTests: XCTestCase {
         XCTAssertEqual(host.normalizedEndpoint, "[2001:db8::1]:2222")
     }
 
+    func testTerminalUsesBundledJetBrainsMono() {
+        XCTAssertTrue(MobileTerminalFont.registerBundledFonts())
+
+        let terminalView = KeroTerminalView(
+            frame: CGRect(x: 0, y: 0, width: 390, height: 700)
+        )
+        XCTAssertTrue(
+            terminalView.renderedTerminalConfiguration.contains(
+                "font-family = JetBrains Mono"
+            )
+        )
+
+        terminalView.setFontSize(17)
+        XCTAssertTrue(
+            terminalView.renderedTerminalConfiguration.contains(
+                "font-size = 17"
+            )
+        )
+        XCTAssertEqual(terminalView.configuredFontSize, 17, accuracy: 0.01)
+    }
+
+    func testRemoteGitPorcelainParser() {
+        let records = [
+            "# branch.head feature/files",
+            "# branch.upstream origin/feature/files",
+            "# branch.ab +2 -1",
+            "1 M. N... 100644 100644 100644 abc def README.md",
+            "1 .M N... 100644 100644 100644 abc def Sources/App.swift",
+            "2 R. N... 100644 100644 100644 abc def R100 Sources/New.swift",
+            "Sources/Old.swift",
+            "? Notes.md",
+        ]
+        let data = Data(
+            (records.joined(separator: "\0") + "\0").utf8
+        )
+
+        let snapshot = RemoteProjectModel.parseGitStatus(
+            data,
+            repositoryRoot: "/srv/kero"
+        )
+
+        XCTAssertEqual(snapshot.branch, "feature/files")
+        XCTAssertEqual(snapshot.upstream, "origin/feature/files")
+        XCTAssertEqual(snapshot.ahead, 2)
+        XCTAssertEqual(snapshot.behind, 1)
+        XCTAssertEqual(snapshot.entries.map(\.path), [
+            "Notes.md",
+            "README.md",
+            "Sources/App.swift",
+            "Sources/New.swift",
+        ])
+        XCTAssertEqual(snapshot.staged.map(\.path), [
+            "README.md",
+            "Sources/New.swift",
+        ])
+        XCTAssertEqual(snapshot.changed.map(\.path), [
+            "Notes.md",
+            "Sources/App.swift",
+        ])
+    }
+
+    func testRemoteFilesRunPOSIXListingThroughExplicitShell() async {
+        var commands: [String] = []
+        let project = RemoteProjectModel { command in
+            commands.append(command)
+            if command.hasPrefix("git -C ") {
+                return SSHCommandResult(
+                    stdout: Data(),
+                    stderr: Data(),
+                    exitStatus: 1
+                )
+            }
+            return SSHCommandResult(
+                stdout: Data("d\0Sources\0f\0README.md\0".utf8),
+                stderr: Data(),
+                exitStatus: 0
+            )
+        }
+
+        project.setWorkingDirectory("/Users/o'brien")
+        await project.refreshFiles()
+
+        XCTAssertEqual(project.files.map(\.name), ["Sources", "README.md"])
+        guard let listing = commands.last else {
+            return XCTFail("The remote directory listing was not requested.")
+        }
+        XCTAssertTrue(listing.hasPrefix("/bin/sh -c "))
+        XCTAssertTrue(listing.contains("dir=$1"))
+        XCTAssertTrue(listing.hasSuffix(" sh '/Users/o'\\''brien'"))
+        XCTAssertFalse(listing.hasPrefix("dir="))
+    }
+
+    func testRemoteGitRepositoryCanBeInitialized() async {
+        var commands: [String] = []
+        var initialized = false
+        let project = RemoteProjectModel { command in
+            commands.append(command)
+            if command.contains("rev-parse --show-toplevel") {
+                return SSHCommandResult(
+                    stdout: Data(),
+                    stderr: Data(),
+                    exitStatus: 128
+                )
+            }
+            if command.hasSuffix(" init") {
+                initialized = true
+                return SSHCommandResult(
+                    stdout: Data(
+                        "Initialized empty Git repository\n".utf8
+                    ),
+                    stderr: Data(),
+                    exitStatus: 0
+                )
+            }
+            if command.contains("status --porcelain=v2") {
+                if !initialized {
+                    return SSHCommandResult(
+                        stdout: Data(),
+                        stderr: Data(
+                            "fatal: not a git repository\n".utf8
+                        ),
+                        exitStatus: 128
+                    )
+                }
+                return SSHCommandResult(
+                    stdout: Data(
+                        "# branch.oid (initial)\0"
+                            .appending("# branch.head main\0")
+                            .appending("? README.md\0")
+                            .utf8
+                    ),
+                    stderr: Data(),
+                    exitStatus: 0
+                )
+            }
+            return SSHCommandResult(
+                stdout: Data(),
+                stderr: Data(),
+                exitStatus: 1
+            )
+        }
+
+        project.setWorkingDirectory("/Users/builder/project")
+        await project.refreshGit()
+
+        XCTAssertTrue(project.hasLoadedGit)
+        XCTAssertTrue(project.canInitializeGit)
+        XCTAssertNil(project.git)
+        XCTAssertNil(project.gitError)
+
+        await project.initializeRepository()
+
+        XCTAssertFalse(project.canInitializeGit)
+        XCTAssertEqual(project.git?.branch, "main")
+        XCTAssertEqual(project.git?.changed.map(\.path), ["README.md"])
+        XCTAssertTrue(
+            commands.contains(
+                "git -C '/Users/builder/project' init"
+            )
+        )
+    }
+
     func testKnownHostsPersistAndDetectChangedKeys() throws {
         let url = temporaryDirectory.appendingPathComponent("known-hosts.json")
         let store = KnownHostStore(storageURL: url)
@@ -215,6 +377,9 @@ final class KeroMobileTests: XCTestCase {
         let resizeReceived = expectation(
             description: "Shell received the requested terminal size"
         )
+        let commandReceived = expectation(
+            description: "Exec channel received a remote command"
+        )
         let disconnected = expectation(
             description: "SSH client disconnected cleanly"
         )
@@ -235,10 +400,28 @@ final class KeroMobileTests: XCTestCase {
             }
             resizeReceived.fulfill()
         }
+        server.onExec = { command in
+            commandReceived.fulfill()
+            return TestSSHCommandResponse(
+                stdout: "executed:\(command)\n",
+                stderr: "command-warning\n",
+                exitStatus: 7
+            )
+        }
 
         let terminalView = KeroTerminalView(
             frame: CGRect(x: 0, y: 0, width: 390, height: 700)
         )
+        let window = UIWindow(frame: terminalView.frame)
+        let viewController = UIViewController()
+        window.rootViewController = viewController
+        viewController.view.addSubview(terminalView)
+        window.makeKeyAndVisible()
+        terminalView.fitToSize()
+        defer {
+            terminalView.removeFromSuperview()
+            window.isHidden = true
+        }
         let host = SSHHost(
             name: "Integration Server",
             hostname: "127.0.0.1",
@@ -280,13 +463,24 @@ final class KeroMobileTests: XCTestCase {
             }
         )
 
+        terminalView.attachConnection(connection)
         connection.connect()
         await fulfillment(
             of: [hostKeyReceived, connected],
             timeout: 8
         )
 
-        connection.send(Data("release-check\r".utf8))
+        let commandResult = try await withCheckedThrowingContinuation {
+            continuation in
+            connection.execute(command: "pwd -P") {
+                continuation.resume(with: $0)
+            }
+        }
+        XCTAssertEqual(commandResult.stdoutString, "executed:pwd -P\n")
+        XCTAssertEqual(commandResult.stderrString, "command-warning\n")
+        XCTAssertEqual(commandResult.exitStatus, 7)
+
+        terminalView.insertText("release-check\r")
         connection.resize(
             SSHWindowSize(
                 columns: 101,
@@ -296,11 +490,16 @@ final class KeroMobileTests: XCTestCase {
             )
         )
         await fulfillment(
-            of: [inputReceived, resizeReceived],
+            of: [commandReceived, inputReceived, resizeReceived],
             timeout: 5
+        )
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(
+            terminalView.viewportText().contains("Kero integration shell")
         )
 
         connection.disconnect()
+        terminalView.detachConnection(connection)
         await fulfillment(of: [disconnected], timeout: 5)
     }
 

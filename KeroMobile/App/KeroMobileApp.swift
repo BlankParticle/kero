@@ -8,6 +8,8 @@ struct KeroMobileApp: App {
     @StateObject private var sessionStore: TerminalSessionStore
 
     init() {
+        MobileTerminalFont.registerBundledFonts()
+
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-live-ssh-testing") {
             let environment = ProcessInfo.processInfo.environment
@@ -89,7 +91,8 @@ struct KeroMobileApp: App {
             )
             let arguments = ProcessInfo.processInfo.arguments
             if arguments.contains("-ui-testing-active-sessions")
-                || arguments.contains("-ui-testing-single-active-session") {
+                || arguments.contains("-ui-testing-single-active-session")
+                || arguments.contains("-ui-testing-project-panels") {
                 let hosts = [
                     SSHHost(
                         name: "Build Server",
@@ -102,13 +105,15 @@ struct KeroMobileApp: App {
                         username: "admin"
                     ),
                 ]
-                let sessionCount = arguments.contains(
-                    "-ui-testing-single-active-session"
-                ) ? 1 : 2
-                for host in hosts.prefix(sessionCount) {
+                let sessionCount =
+                    arguments.contains("-ui-testing-single-active-session")
+                        || arguments.contains("-ui-testing-project-panels")
+                    ? 1
+                    : 2
+                for (index, host) in hosts.prefix(sessionCount).enumerated() {
                     let session = sessionStore.openSession(for: host)
-                    session.terminalView.feed(
-                        text: """
+                    session.terminalView.receive(
+                        """
                         Last login: Wed Jul 29 18:40:47 2026
                         Welcome to fish, the friendly interactive shell
                         Type help for instructions on how to use fish
@@ -118,6 +123,61 @@ struct KeroMobileApp: App {
                     )
                     session.updateTitle("[\(host.displayName)] ~")
                     session.captureThumbnail()
+                    if index == 0,
+                       arguments.contains("-ui-testing-project-panels") {
+                        let gitPreview: RemoteGitSnapshot? = arguments.contains(
+                            "-ui-testing-project-no-repository"
+                        )
+                            ? nil
+                            : RemoteGitSnapshot(
+                                repositoryRoot: "/Users/builder/kero",
+                                branch: "main",
+                                upstream: "origin/main",
+                                ahead: 1,
+                                behind: 0,
+                                entries: [
+                                    RemoteGitEntry(
+                                        path: "README.md",
+                                        stagedStatus: "M",
+                                        worktreeStatus: "."
+                                    ),
+                                    RemoteGitEntry(
+                                        path: "Sources/App.swift",
+                                        stagedStatus: ".",
+                                        worktreeStatus: "M"
+                                    ),
+                                    RemoteGitEntry(
+                                        path: "Notes.md",
+                                        stagedStatus: "?",
+                                        worktreeStatus: "."
+                                    ),
+                                ]
+                            )
+                        session.remoteProject.installPreview(
+                            root: "/Users/builder/kero",
+                            files: [
+                                RemoteFileItem(
+                                    name: "Sources",
+                                    path: "/Users/builder/kero/Sources",
+                                    isDirectory: true,
+                                    depth: 0
+                                ),
+                                RemoteFileItem(
+                                    name: "Package.swift",
+                                    path: "/Users/builder/kero/Package.swift",
+                                    isDirectory: false,
+                                    depth: 0
+                                ),
+                                RemoteFileItem(
+                                    name: "README.md",
+                                    path: "/Users/builder/kero/README.md",
+                                    isDirectory: false,
+                                    depth: 0
+                                ),
+                            ],
+                            git: gitPreview
+                        )
+                    }
                 }
             }
             _sessionStore = StateObject(wrappedValue: sessionStore)

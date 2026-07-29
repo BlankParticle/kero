@@ -14,6 +14,22 @@ enum TestSSHAuthentication {
     )
 }
 
+struct TestSSHCommandResponse {
+    let stdout: String
+    let stderr: String
+    let exitStatus: Int
+
+    init(
+        stdout: String,
+        stderr: String = "",
+        exitStatus: Int = 0
+    ) {
+        self.stdout = stdout
+        self.stderr = stderr
+        self.exitStatus = exitStatus
+    }
+}
+
 final class TestSSHServer {
     private let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     private let authentication: TestSSHAuthentication
@@ -21,6 +37,7 @@ final class TestSSHServer {
 
     var onInput: ((Data) -> Void)?
     var onResize: ((SSHChannelRequestEvent.WindowChangeRequest) -> Void)?
+    var onExec: ((String) -> TestSSHCommandResponse)?
 
     init(authentication: TestSSHAuthentication = .releasePassword) {
         self.authentication = authentication
@@ -64,6 +81,14 @@ final class TestSSHServer {
                                     },
                                     onResize: { [weak self] request in
                                         self?.onResize?(request)
+                                    },
+                                    onExec: { [weak self] command in
+                                        self?.onExec?(command)
+                                            ?? TestSSHCommandResponse(
+                                                stdout: "",
+                                                stderr: "Unsupported command",
+                                                exitStatus: 127
+                                            )
                                     }
                                 )
                             )
@@ -204,13 +229,16 @@ private final class TestShellHandler: ChannelDuplexHandler {
 
     private let onInput: (Data) -> Void
     private let onResize: (SSHChannelRequestEvent.WindowChangeRequest) -> Void
+    private let onExec: (String) -> TestSSHCommandResponse
 
     init(
         onInput: @escaping (Data) -> Void,
-        onResize: @escaping (SSHChannelRequestEvent.WindowChangeRequest) -> Void
+        onResize: @escaping (SSHChannelRequestEvent.WindowChangeRequest) -> Void,
+        onExec: @escaping (String) -> TestSSHCommandResponse
     ) {
         self.onInput = onInput
         self.onResize = onResize
+        self.onExec = onExec
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -254,28 +282,62 @@ private final class TestShellHandler: ChannelDuplexHandler {
             )
         case let request as SSHChannelRequestEvent.WindowChangeRequest:
             onResize(request)
+        case let request as SSHChannelRequestEvent.ExecRequest:
+            if request.wantReply {
+                context.triggerUserOutboundEvent(
+                    ChannelSuccessEvent(),
+                    promise: nil
+                )
+            }
+            let response = onExec(request.command)
+            let stdoutFuture = send(
+                response.stdout,
+                type: .channel,
+                context: context
+            )
+            let stderrFuture = send(
+                response.stderr,
+                type: .stdErr,
+                context: context
+            )
+            stdoutFuture.and(stderrFuture).flatMap { _ in
+                context.triggerUserOutboundEvent(
+                    SSHChannelRequestEvent.ExitStatus(
+                        exitStatus: response.exitStatus
+                    )
+                )
+            }.whenComplete { _ in
+                context.close(promise: nil)
+            }
         default:
             context.fireUserInboundEventTriggered(event)
         }
     }
 
+    @discardableResult
     private func send(
         _ text: String,
+        type: SSHChannelData.DataType = .channel,
         context: ChannelHandlerContext
-    ) {
+    ) -> EventLoopFuture<Void> {
+        guard !text.isEmpty else {
+            return context.eventLoop.makeSucceededVoidFuture()
+        }
         var buffer = context.channel.allocator.buffer(
             capacity: text.utf8.count
         )
         buffer.writeString(text)
+        let promise = context.eventLoop.makePromise(of: Void.self)
         context.writeAndFlush(
             wrapOutboundOut(
                 SSHChannelData(
-                    type: .channel,
+                    type: type,
                     data: .byteBuffer(buffer)
                 )
             ),
-            promise: nil
+            promise: promise
         )
+        return promise.futureResult
     }
 }
 
