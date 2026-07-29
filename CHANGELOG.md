@@ -16,7 +16,7 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unrelease]
 
-- Keep sidebar project rows stable while agent activity titles animate or hover controls appear, including Grok CLI's multi-part status titles
+- Show terminal titles verbatim while keeping sidebar project rows stable as titles update or hover controls appear
 - Follow the terminal's foreground job into another checkout: when an agent
   switches to its own git worktree, Files, Git and Info re-root to it
 - Settings font preview now reflects “Thicken font strokes”

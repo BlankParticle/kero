@@ -294,22 +294,10 @@ private struct SidebarProjectRow: View {
 
     private var rowContent: some View {
         HStack(spacing: 8) {
-            // Activity replaces the folder inside one fixed slot. This keeps
-            // both text lines aligned without reflowing the row as an agent
-            // starts, stops, or asks for approval.
-            ZStack {
-                if let activity = project.activityIndicator {
-                    Text(activity)
-                        .font(.system(size: fontSize, design: .monospaced))
-                        .foregroundStyle(isSelected ? .primary : .secondary)
-                        .accessibilityHidden(true)
-                } else {
-                    Image(systemName: "folder")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(isSelected ? Color(nsColor: Theme.accent) : .secondary)
-                }
-            }
-            .frame(width: max(14, fontSize), alignment: .center)
+            Image(systemName: "folder")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(isSelected ? Color(nsColor: Theme.accent) : .secondary)
+                .frame(width: max(14, fontSize), alignment: .center)
 
             VStack(alignment: .leading, spacing: 1) {
                 if isRenaming {
@@ -337,7 +325,7 @@ private struct SidebarProjectRow: View {
 
             // Fixed trailing slot: close and the ⌘N hint share the same
             // width so hover does not reflow the row. Continuous title
-            // updates from a running agent re-render the strip; without a
+            // updates from the terminal re-render the strip; without a
             // stable slot that reflow reads as jitter under the pointer.
             ZStack(alignment: .trailing) {
                 if isHovering, !isRenaming {
@@ -363,7 +351,7 @@ private struct SidebarProjectRow: View {
     }
 
     private func beginRename() {
-        renameDraft = project.renameDraftName
+        renameDraft = project.name
         isRenaming = true
         DispatchQueue.main.async {
             renameFocused = true
