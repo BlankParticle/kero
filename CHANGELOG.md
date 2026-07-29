@@ -16,8 +16,7 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unrelease]
 
-- Refine terminal chrome with a cleaner tab bar, inset rounded pane frames,
-  and per-pane live titles and split controls in split layouts
+- Add per-pane live titles and split controls in split layouts
 
 ## [0.1.34]
 

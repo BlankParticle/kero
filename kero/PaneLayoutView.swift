@@ -89,7 +89,7 @@ struct PaneLayoutView: View {
         }
         // Inset the whole grid from the parent by the same gap used between
         // tiles, so a split tab has even breathing room on every side. A
-        // single-pane tab stays full-bleed.
+        // single-pane tab stays full-bleed, exactly as before splits existed.
         .padding(tab.hasMultiplePanes ? gap : 0)
         .onPreferenceChange(PaneFramePreferenceKey.self) { paneFrames = $0 }
         // A divider or pane-move drag can't deliver its ending callback once
@@ -538,11 +538,11 @@ private struct PaneView: View {
     }
 
     private var focusRing: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
             .strokeBorder(
                 isFocused
                     ? Color(nsColor: Theme.accent).opacity(0.85)
-                    : Color(nsColor: Theme.accent).opacity(0.35),
+                    : Color.primary.opacity(0.06),
                 lineWidth: isFocused ? 1.5 : 1
             )
     }
@@ -552,10 +552,10 @@ private struct PaneView: View {
         if let dropEdge {
             GeometryReader { geo in
                 let rect = highlightRect(for: dropEdge, in: geo.size)
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Color(nsColor: Theme.accent).opacity(0.18))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .strokeBorder(Color(nsColor: Theme.accent), lineWidth: 2)
                     )
                     .frame(width: rect.width, height: rect.height)
