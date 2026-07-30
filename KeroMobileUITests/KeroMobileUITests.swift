@@ -70,11 +70,22 @@ final class KeroMobileUITests: XCTestCase {
             capture("Live Active Session")
             activeSession.tap()
 
-            XCTAssertTrue(
-                app.textViews["ssh-terminal"].waitForExistence(timeout: 3)
-            )
+            let terminal = app.textViews["ssh-terminal"]
+            XCTAssertTrue(terminal.waitForExistence(timeout: 3))
             XCTAssertFalse(app.buttons["Trust and Connect"].exists)
             assertSessionConnected()
+
+            terminal.tap()
+            typeWithSoftwareKeyboard("uname")
+            let commandOutput = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value CONTAINS 'Darwin'"),
+                object: terminal
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [commandOutput], timeout: 8),
+                .completed,
+                "Return must submit the command and render the remote response."
+            )
         default:
             XCTFail("Unknown live SSH test mode: \(mode)")
         }
@@ -475,11 +486,32 @@ final class KeroMobileUITests: XCTestCase {
         app.segmentedControls.buttons["Git"].tap()
         XCTAssertTrue(app.staticTexts["main"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["origin/main"].exists)
-        XCTAssertTrue(app.staticTexts["Staged"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["git-commit-message"].exists)
+        XCTAssertTrue(app.buttons["git-commit-staged"].exists)
+        XCTAssertTrue(app.buttons["git-sync"].exists)
+        XCTAssertTrue(app.buttons["git-action-menu"].exists)
+        capture("Mobile Source Control Header")
+
+        for _ in 0..<3 where !app.staticTexts["Staged"].exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(app.staticTexts["Staged"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["Changes"].exists)
         XCTAssertTrue(app.staticTexts["App.swift"].exists)
         XCTAssertTrue(app.staticTexts["Sources"].exists)
-        capture("Remote Git Panel")
+        capture("Mobile Source Control Changes")
+
+        for _ in 0..<3 where !app.buttons["git-branch-picker"].exists {
+            app.swipeDown()
+        }
+
+        app.buttons["git-branch-picker"].tap()
+        XCTAssertTrue(app.navigationBars["Branches"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["feature/mobile-source-control"].exists)
+        XCTAssertTrue(app.staticTexts["release/0.0.1"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["git-new-branch-name"].exists)
+        capture("Mobile Git Branches")
+        app.navigationBars["Branches"].buttons["Done"].tap()
     }
 
     func testTerminalOffersRepositoryInitialization() {
@@ -541,10 +573,31 @@ final class KeroMobileUITests: XCTestCase {
         element.typeText(text)
     }
 
+    private func typeWithSoftwareKeyboard(_ text: String) {
+        let keyboard = app.keyboards.firstMatch
+        if !keyboard.waitForExistence(timeout: 2) {
+            app.buttons["terminal-keyboard"].tap()
+        }
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 2))
+
+        for character in text {
+            let key = keyboard.keys[String(character)]
+            XCTAssertTrue(key.waitForExistence(timeout: 1))
+            key.tap()
+        }
+
+        let returnKey = keyboard.buttons["return"]
+        XCTAssertTrue(returnKey.waitForExistence(timeout: 1))
+        returnKey.tap()
+    }
+
     private func assertSessionConnected() {
-        let sessionButton = app.buttons["Session"]
+        let sessionButton = app.buttons["Session actions"]
         XCTAssertTrue(sessionButton.waitForExistence(timeout: 10))
-        let connected = NSPredicate(format: "value == %@", "Connected")
+        let connected = NSPredicate(
+            format: "value BEGINSWITH %@",
+            "Connected"
+        )
         expectation(for: connected, evaluatedWith: sessionButton)
         waitForExpectations(timeout: 10)
     }

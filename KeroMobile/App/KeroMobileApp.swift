@@ -132,9 +132,10 @@ struct KeroMobileApp: App {
                             : RemoteGitSnapshot(
                                 repositoryRoot: "/Users/builder/kero",
                                 branch: "main",
+                                headOID: "751864f616a4563d5e0abcc9b52f1f530c0f18e2",
                                 upstream: "origin/main",
                                 ahead: 1,
-                                behind: 0,
+                                behind: 2,
                                 entries: [
                                     RemoteGitEntry(
                                         path: "README.md",
@@ -151,7 +152,30 @@ struct KeroMobileApp: App {
                                         stagedStatus: "?",
                                         worktreeStatus: "."
                                     ),
-                                ]
+                                ],
+                                branches: [
+                                    "feature/mobile-source-control",
+                                    "main",
+                                    "release/0.0.1",
+                                ],
+                                remotes: ["origin"],
+                                recentCommits: [
+                                    RemoteGitCommit(
+                                        hash: "751864f616a4563d5e0abcc9b52f1f530c0f18e2",
+                                        shortHash: "751864f",
+                                        subject: "Polish mobile terminal header",
+                                        author: "Egoist",
+                                        date: Date(timeIntervalSince1970: 1_775_011_200)
+                                    ),
+                                    RemoteGitCommit(
+                                        hash: "4af2b601cd9c93498d987f2cbd5676f2fa4a735d",
+                                        shortHash: "4af2b60",
+                                        subject: "Add remote project browser",
+                                        author: "Egoist",
+                                        date: Date(timeIntervalSince1970: 1_774_924_800)
+                                    ),
+                                ],
+                                stashCount: 1
                             )
                         session.remoteProject.installPreview(
                             root: "/Users/builder/kero",

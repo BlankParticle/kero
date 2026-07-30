@@ -1,9 +1,62 @@
 import GhosttyTerminal
 import UIKit
 
+/// Keeps real pastes bracketed while turning UIKit's Return-only "paste"
+/// into the carriage return an interactive SSH PTY expects.
+struct SSHPTYInputNormalizer {
+    private static let bracketedPasteStart = Data("\u{1B}[200~".utf8)
+    private static let bracketedPasteEnd = Data("\u{1B}[201~".utf8)
+    private static let maximumBufferedPasteBytes = 1_024 * 1_024
+
+    private var pendingPaste: Data?
+
+    mutating func process(_ data: Data) -> Data? {
+        if var pendingPaste {
+            if data == Self.bracketedPasteEnd {
+                self.pendingPaste = nil
+                if pendingPaste == Data([0x0A])
+                    || pendingPaste == Data([0x0D])
+                    || pendingPaste == Data([0x0D, 0x0A])
+                {
+                    return Data([0x0D])
+                }
+
+                var paste = Self.bracketedPasteStart
+                paste.append(pendingPaste)
+                paste.append(Self.bracketedPasteEnd)
+                return paste
+            }
+
+            pendingPaste.append(data)
+            if pendingPaste.count > Self.maximumBufferedPasteBytes {
+                self.pendingPaste = nil
+                var unbufferedPaste = Self.bracketedPasteStart
+                unbufferedPaste.append(pendingPaste)
+                return unbufferedPaste
+            }
+            self.pendingPaste = pendingPaste
+            return nil
+        }
+
+        if data == Self.bracketedPasteStart {
+            pendingPaste = Data()
+            return nil
+        }
+
+        return data.contains(0x0A)
+            ? Data(data.map { $0 == 0x0A ? 0x0D : $0 })
+            : data
+    }
+
+    mutating func reset() {
+        pendingPaste = nil
+    }
+}
+
 private final class TerminalTransportBridge: @unchecked Sendable {
     private let lock = NSLock()
     private weak var connection: SSHConnection?
+    private var inputNormalizer = SSHPTYInputNormalizer()
     private var lastSize = SSHWindowSize(
         columns: 80,
         rows: 24,
@@ -14,6 +67,7 @@ private final class TerminalTransportBridge: @unchecked Sendable {
     func attach(_ connection: SSHConnection) {
         lock.lock()
         self.connection = connection
+        inputNormalizer.reset()
         lock.unlock()
     }
 
@@ -21,15 +75,19 @@ private final class TerminalTransportBridge: @unchecked Sendable {
         lock.lock()
         if connection === expectedConnection {
             connection = nil
+            inputNormalizer.reset()
         }
         lock.unlock()
     }
 
     func send(_ data: Data) {
         lock.lock()
+        let terminalData = inputNormalizer.process(data)
         let connection = connection
         lock.unlock()
-        connection?.send(data)
+        if let terminalData {
+            connection?.send(terminalData)
+        }
     }
 
     func resize(_ viewport: InMemoryTerminalViewport) {
@@ -158,7 +216,9 @@ final class KeroTerminalView: UITerminalView,
             )
         }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-ui-testing") {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-ui-testing")
+            || arguments.contains("-live-ssh-testing") {
             accessibilityValue = String(decoding: cachedOutput, as: UTF8.self)
         }
         #endif

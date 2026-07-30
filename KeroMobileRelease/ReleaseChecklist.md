@@ -62,6 +62,12 @@ legal owner, a public web host, physical devices, or a review server.
 
 - [ ] Install the current stable Xcode accepted by App Store Connect. Do not
       upload an archive produced by a beta Xcode.
+- [ ] Run `bun scripts/release-ios-testflight.ts --dry-run` to verify the
+      stable Xcode, signing team, export options, version, and next build
+      number. Run the same command without `--dry-run` to execute the offline
+      test pass, reserve that build number, archive, upload, and verify Apple's
+      upload receipt. Use `--build N --skip-tests` only to retry the same
+      release candidate after an upload failure.
 - [x] Resolve packages from the committed `Package.resolved` file.
 - [x] Run unit, loopback SSH integration, UI, and static analyzer checks.
 - [x] Build Debug and Release for a generic iOS device with no warnings.

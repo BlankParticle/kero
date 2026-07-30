@@ -31,6 +31,31 @@ final class KeroMobileTests: XCTestCase {
         keychain = nil
     }
 
+    func testSoftwareKeyboardReturnEscapesBracketedPaste() {
+        let pasteStart = Data("\u{1B}[200~".utf8)
+        let pasteEnd = Data("\u{1B}[201~".utf8)
+        var normalizer = SSHPTYInputNormalizer()
+
+        XCTAssertNil(normalizer.process(pasteStart))
+        XCTAssertNil(normalizer.process(Data([0x0A])))
+        XCTAssertEqual(normalizer.process(pasteEnd), Data([0x0D]))
+    }
+
+    func testMultilinePasteRemainsBracketed() {
+        let pasteStart = Data("\u{1B}[200~".utf8)
+        let pasteEnd = Data("\u{1B}[201~".utf8)
+        let payload = Data("printf one\nprintf two".utf8)
+        var normalizer = SSHPTYInputNormalizer()
+
+        XCTAssertNil(normalizer.process(pasteStart))
+        XCTAssertNil(normalizer.process(payload))
+
+        var expected = pasteStart
+        expected.append(payload)
+        expected.append(pasteEnd)
+        XCTAssertEqual(normalizer.process(pasteEnd), expected)
+    }
+
     func testHostnameNormalizationAndIPv6Display() {
         XCTAssertEqual(
             SSHHost.normalizeHostnameInput("  [2001:db8::1]  "),
@@ -72,6 +97,7 @@ final class KeroMobileTests: XCTestCase {
 
     func testRemoteGitPorcelainParser() {
         let records = [
+            "# branch.oid 751864f616a4563d5e0abcc9b52f1f530c0f18e2",
             "# branch.head feature/files",
             "# branch.upstream origin/feature/files",
             "# branch.ab +2 -1",
@@ -91,6 +117,11 @@ final class KeroMobileTests: XCTestCase {
         )
 
         XCTAssertEqual(snapshot.branch, "feature/files")
+        XCTAssertEqual(
+            snapshot.headOID,
+            "751864f616a4563d5e0abcc9b52f1f530c0f18e2"
+        )
+        XCTAssertTrue(snapshot.hasHead)
         XCTAssertEqual(snapshot.upstream, "origin/feature/files")
         XCTAssertEqual(snapshot.ahead, 2)
         XCTAssertEqual(snapshot.behind, 1)
@@ -104,10 +135,146 @@ final class KeroMobileTests: XCTestCase {
             "README.md",
             "Sources/New.swift",
         ])
+        XCTAssertEqual(
+            snapshot.entries.last?.originalPath,
+            "Sources/Old.swift"
+        )
         XCTAssertEqual(snapshot.changed.map(\.path), [
             "Notes.md",
             "Sources/App.swift",
         ])
+    }
+
+    func testRemoteGitRepositoryDetailsParser() {
+        let snapshot = RemoteGitSnapshot(
+            repositoryRoot: "/srv/kero",
+            branch: "feature/mobile",
+            headOID: "abcdef",
+            upstream: "origin/feature/mobile",
+            ahead: 1,
+            behind: 2,
+            entries: []
+        )
+        let details = """
+        B\tmain
+        B\tfeature/mobile
+        R\torigin
+        C\tabcdef\tabcdef0\t1775011200\tEgoist\tImprove Source Control
+        S\t2
+        O\tRebasing
+
+        """
+
+        let parsed = RemoteProjectModel.parseRepositoryDetails(
+            Data(details.utf8),
+            snapshot: snapshot
+        )
+
+        XCTAssertEqual(parsed.branches, ["feature/mobile", "main"])
+        XCTAssertEqual(parsed.remotes, ["origin"])
+        XCTAssertEqual(parsed.recentCommits.first?.shortHash, "abcdef0")
+        XCTAssertEqual(
+            parsed.recentCommits.first?.subject,
+            "Improve Source Control"
+        )
+        XCTAssertEqual(parsed.stashCount, 2)
+        XCTAssertEqual(parsed.repositoryOperation, "Rebasing")
+    }
+
+    func testRemoteGitCommitKeepsStagedOnlyAsTheDefault() async {
+        let recorder = GitCommandRecorder()
+        let project = RemoteProjectModel { command in
+            recorder.commands.append(command)
+            return recorder.result(for: command)
+        }
+        project.setWorkingDirectory("/srv/kero")
+        await project.refreshGit()
+
+        let success = await project.commit(
+            message: "Ship mobile source control",
+            includeAll: false
+        )
+
+        XCTAssertTrue(success)
+        XCTAssertTrue(
+            recorder.commands.contains {
+                $0.contains("git -C '/srv/kero' commit -m ")
+            }
+        )
+        XCTAssertFalse(
+            recorder.commands.contains {
+                $0.contains("git -C '/srv/kero' add -A")
+            }
+        )
+        XCTAssertTrue(
+            recorder.commands
+                .filter { $0.contains("git -C '/srv/kero'") }
+                .allSatisfy {
+                    $0.hasPrefix(
+                        "env LC_ALL=C GIT_TERMINAL_PROMPT=0 "
+                    )
+                        || $0.hasPrefix("git -C ")
+                }
+        )
+    }
+
+    func testRemoteGitStageAllCommitAndSyncAreExplicit() async {
+        let recorder = GitCommandRecorder()
+        let project = RemoteProjectModel { command in
+            recorder.commands.append(command)
+            return recorder.result(for: command)
+        }
+        project.setWorkingDirectory("/srv/kero")
+        await project.refreshGit()
+
+        let committed = await project.commit(
+            message: "Commit everything",
+            includeAll: true
+        )
+        XCTAssertTrue(committed)
+        XCTAssertTrue(
+            recorder.commands.contains {
+                $0.contains("git -C '/srv/kero' add -A")
+            }
+        )
+
+        recorder.commands.removeAll()
+        let synced = await project.syncChanges()
+        XCTAssertTrue(synced)
+        let syncCommands = recorder.commands.filter {
+            $0.contains("git -C '/srv/kero' pull --ff-only")
+                || $0.contains("git -C '/srv/kero' push")
+        }
+        XCTAssertEqual(syncCommands.count, 2)
+        XCTAssertTrue(syncCommands[0].contains("pull --ff-only"))
+        XCTAssertTrue(syncCommands[1].hasSuffix(" push"))
+    }
+
+    func testRemoteGitDiscardIsPathScoped() async throws {
+        let recorder = GitCommandRecorder()
+        let project = RemoteProjectModel { command in
+            recorder.commands.append(command)
+            return recorder.result(for: command)
+        }
+        project.setWorkingDirectory("/srv/kero")
+        await project.refreshGit()
+
+        let untracked = RemoteGitEntry(
+            path: "Notes from O'Brien.txt",
+            stagedStatus: "?",
+            worktreeStatus: "."
+        )
+        let discarded = await project.discard(untracked)
+        XCTAssertTrue(discarded)
+
+        let clean = try XCTUnwrap(
+            recorder.commands.first {
+                $0.contains(" clean -f -- ")
+            }
+        )
+        XCTAssertTrue(clean.contains("--literal-pathspecs clean -f --"))
+        XCTAssertTrue(clean.contains("'Notes from O'\\''Brien.txt'"))
+        XCTAssertFalse(clean.contains("clean -fd"))
     }
 
     func testRemoteFilesRunPOSIXListingThroughExplicitShell() async {
@@ -205,9 +372,11 @@ final class KeroMobileTests: XCTestCase {
         XCTAssertEqual(project.git?.branch, "main")
         XCTAssertEqual(project.git?.changed.map(\.path), ["README.md"])
         XCTAssertTrue(
-            commands.contains(
-                "git -C '/Users/builder/project' init"
-            )
+            commands.contains {
+                $0.contains(
+                    "git -C '/Users/builder/project' init"
+                )
+            }
         )
     }
 
@@ -385,8 +554,7 @@ final class KeroMobileTests: XCTestCase {
         )
 
         server.onInput = { data in
-            guard String(data: data, encoding: .utf8)?
-                .contains("release-check\r") == true else {
+            guard data == Data([0x0D]) else {
                 return
             }
             inputReceived.fulfill()
@@ -480,7 +648,13 @@ final class KeroMobileTests: XCTestCase {
         XCTAssertEqual(commandResult.stderrString, "command-warning\n")
         XCTAssertEqual(commandResult.exitStatus, 7)
 
-        terminalView.insertText("release-check\r")
+        // Exercise the protocol witness used by UIKit's software keyboard,
+        // not a direct subclass call.
+        let softwareKeyboard: any UIKeyInput = terminalView
+        for character in "release-check" {
+            softwareKeyboard.insertText(String(character))
+        }
+        softwareKeyboard.insertText("\n")
         connection.resize(
             SSHWindowSize(
                 columns: 101,
@@ -682,5 +856,44 @@ final class KeroMobileTests: XCTestCase {
         await fulfillment(of: [connected], timeout: 8)
         connection.disconnect()
         await fulfillment(of: [disconnected], timeout: 5)
+    }
+}
+
+@MainActor
+private final class GitCommandRecorder {
+    var commands: [String] = []
+
+    func result(for command: String) -> SSHCommandResult {
+        if command.contains("rev-parse --show-toplevel") {
+            return success("/srv/kero\n")
+        }
+        if command.contains("status --porcelain=v2") {
+            return success(
+                "# branch.oid abcdef\0"
+                    + "# branch.head main\0"
+                    + "# branch.upstream origin/main\0"
+                    + "# branch.ab +1 -1\0"
+                    + "1 M. N... 100644 100644 100644 abc def README.md\0"
+                    + "1 .M N... 100644 100644 100644 abc def Sources/App.swift\0"
+                    + "? Notes.md\0"
+            )
+        }
+        if command.hasPrefix("/bin/sh -c ") {
+            return success(
+                "B\tmain\n"
+                    + "R\torigin\n"
+                    + "C\tabcdef\tabcdef0\t1775011200\tEgoist\tLatest work\n"
+                    + "S\t1\n"
+            )
+        }
+        return success()
+    }
+
+    private func success(_ output: String = "") -> SSHCommandResult {
+        SSHCommandResult(
+            stdout: Data(output.utf8),
+            stderr: Data(),
+            exitStatus: 0
+        )
     }
 }

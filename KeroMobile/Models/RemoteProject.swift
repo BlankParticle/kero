@@ -16,6 +16,19 @@ struct RemoteGitEntry: Identifiable, Equatable, Sendable {
     let path: String
     let stagedStatus: Character
     let worktreeStatus: Character
+    let originalPath: String?
+
+    init(
+        path: String,
+        stagedStatus: Character,
+        worktreeStatus: Character,
+        originalPath: String? = nil
+    ) {
+        self.path = path
+        self.stagedStatus = stagedStatus
+        self.worktreeStatus = worktreeStatus
+        self.originalPath = originalPath
+    }
 
     var fileName: String {
         (path as NSString).lastPathComponent
@@ -40,15 +53,115 @@ struct RemoteGitEntry: Identifiable, Equatable, Sendable {
     var hasWorktreeChange: Bool {
         worktreeStatus != "." || stagedStatus == "?"
     }
+
+    var isIntentToAdd: Bool {
+        stagedStatus == "." && worktreeStatus == "A"
+    }
+
+    var isUntracked: Bool {
+        stagedStatus == "?" || isIntentToAdd
+    }
+
+    var isWorktreeRename: Bool {
+        worktreeStatus == "R" && originalPath != nil
+    }
+
+    var isWorktreeCopy: Bool {
+        worktreeStatus == "C" && originalPath != nil
+    }
+}
+
+struct RemoteGitCommit: Identifiable, Equatable, Sendable {
+    var id: String { hash }
+
+    let hash: String
+    let shortHash: String
+    let subject: String
+    let author: String
+    let date: Date
+
+    var relativeDate: String {
+        date.formatted(
+            .relative(
+                presentation: .named,
+                unitsStyle: .abbreviated
+            )
+        )
+    }
+}
+
+struct RemoteGitOperation: Identifiable, Equatable, Sendable {
+    enum State: Equatable, Sendable {
+        case running
+        case succeeded
+        case failed
+    }
+
+    let id: UUID
+    let label: String
+    let state: State
+    let output: String
+
+    var isRunning: Bool {
+        state == .running
+    }
+
+    var statusText: String {
+        switch state {
+        case .running:
+            "\(label)…"
+        case .succeeded:
+            "\(label) completed"
+        case .failed:
+            "\(label) failed"
+        }
+    }
 }
 
 struct RemoteGitSnapshot: Equatable, Sendable {
     let repositoryRoot: String
     let branch: String
+    let headOID: String?
+    let hasHead: Bool
     let upstream: String?
     let ahead: Int
     let behind: Int
     let entries: [RemoteGitEntry]
+    let branches: [String]
+    let remotes: [String]
+    let recentCommits: [RemoteGitCommit]
+    let repositoryOperation: String?
+    let stashCount: Int
+
+    init(
+        repositoryRoot: String,
+        branch: String,
+        headOID: String? = nil,
+        hasHead: Bool = true,
+        upstream: String?,
+        ahead: Int,
+        behind: Int,
+        entries: [RemoteGitEntry],
+        branches: [String] = [],
+        remotes: [String] = [],
+        recentCommits: [RemoteGitCommit] = [],
+        repositoryOperation: String? = nil,
+        stashCount: Int = 0
+    ) {
+        self.repositoryRoot = repositoryRoot
+        self.branch = branch
+        self.headOID = headOID
+        self.hasHead = hasHead
+        self.upstream = upstream
+        self.ahead = ahead
+        self.behind = behind
+        self.entries = entries
+        self.branches = branches
+        self.remotes = remotes
+        self.recentCommits = recentCommits
+        self.repositoryOperation = repositoryOperation
+        self.stashCount = stashCount
+    }
 
     var conflicts: [RemoteGitEntry] {
         entries.filter(\.isConflict)
@@ -60,6 +173,10 @@ struct RemoteGitSnapshot: Equatable, Sendable {
 
     var changed: [RemoteGitEntry] {
         entries.filter { $0.hasWorktreeChange && !$0.isConflict }
+    }
+
+    var totalChangeCount: Int {
+        conflicts.count + staged.count + changed.count
     }
 }
 
@@ -95,6 +212,7 @@ final class RemoteProjectModel: ObservableObject {
     @Published private(set) var isLoadingGit = false
     @Published private(set) var gitError: String?
     @Published private(set) var isRunningGitAction = false
+    @Published private(set) var gitOperation: RemoteGitOperation?
 
     private struct FileNode: Equatable {
         let name: String
@@ -211,7 +329,9 @@ final class RemoteProjectModel: ObservableObject {
         }
         do {
             let result = try await execute(
-                "env LC_ALL=C git -C \(Self.shellQuote(projectRoot)) "
+                "env LC_ALL=C GIT_TERMINAL_PROMPT=0 "
+                    + "GIT_OPTIONAL_LOCKS=0 git "
+                    + "-C \(Self.shellQuote(projectRoot)) "
                     + "status --porcelain=v2 --branch -z --untracked-files=all"
             )
             guard result.exitStatus == 0 else {
@@ -222,10 +342,20 @@ final class RemoteProjectModel: ObservableObject {
                 }
                 throw Self.commandError(result)
             }
-            git = Self.parseGitStatus(
+            var snapshot = Self.parseGitStatus(
                 result.stdout,
                 repositoryRoot: projectRoot
             )
+            let details = try await execute(
+                Self.repositoryDetailsCommand(projectRoot)
+            )
+            if details.exitStatus == 0 {
+                snapshot = Self.parseRepositoryDetails(
+                    details.stdout,
+                    snapshot: snapshot
+                )
+            }
+            git = snapshot
         } catch {
             git = nil
             canInitializeGit = false
@@ -238,34 +368,327 @@ final class RemoteProjectModel: ObservableObject {
             gitError = RemoteProjectError.invalidDirectory.localizedDescription
             return
         }
-        isRunningGitAction = true
-        gitError = nil
-        defer { isRunningGitAction = false }
-        do {
-            let result = try await execute(
-                "git -C \(Self.shellQuote(projectRoot)) init"
-            )
-            guard result.exitStatus == 0 else {
-                throw Self.commandError(result)
-            }
+        if await runGitAction(
+            label: "Initialize repository",
+            commands: ["init"],
+            root: projectRoot,
+            validateSnapshot: false
+        ) {
             canInitializeGit = false
-            await refreshGit()
-        } catch {
+        } else {
             canInitializeGit = true
-            gitError = error.localizedDescription
         }
     }
 
-    func stage(_ entry: RemoteGitEntry) async {
-        await runGitAction(
-            arguments: "--literal-pathspecs add -- \(Self.shellQuote(entry.path))"
+    @discardableResult
+    func stage(_ entry: RemoteGitEntry) async -> Bool {
+        let paths = [entry.path]
+            + (entry.worktreeStatus == "R"
+                ? entry.originalPath.map { [$0] } ?? []
+                : [])
+        return await runGitAction(
+            label: "Stage \(entry.fileName)",
+            commands: [
+                "--literal-pathspecs add -- "
+                    + Self.shellArguments(paths)
+            ]
         )
     }
 
-    func unstage(_ entry: RemoteGitEntry) async {
+    @discardableResult
+    func unstage(_ entry: RemoteGitEntry) async -> Bool {
+        guard let git else {
+            return failGitAction("Repository changed; refresh and try again.")
+        }
+        let paths = [entry.path]
+            + (entry.stagedStatus == "R"
+                ? entry.originalPath.map { [$0] } ?? []
+                : [])
+        let arguments = git.hasHead
+            ? "--literal-pathspecs restore --staged -- "
+                + Self.shellArguments(paths)
+            : "--literal-pathspecs rm --cached -f -- "
+                + Self.shellArguments(paths)
+        return await runGitAction(
+            label: "Unstage \(entry.fileName)",
+            commands: [arguments]
+        )
+    }
+
+    @discardableResult
+    func stageAll() async -> Bool {
         await runGitAction(
-            arguments: "--literal-pathspecs restore --staged -- "
-                + Self.shellQuote(entry.path)
+            label: "Stage all changes",
+            commands: ["add -A"]
+        )
+    }
+
+    @discardableResult
+    func unstageAll() async -> Bool {
+        guard let git else {
+            return failGitAction("Repository changed; refresh and try again.")
+        }
+        let arguments = git.hasHead
+            ? "restore --staged -- ."
+            : "rm --cached -r -f -- ."
+        return await runGitAction(
+            label: "Unstage all changes",
+            commands: [arguments]
+        )
+    }
+
+    @discardableResult
+    func discard(_ entry: RemoteGitEntry) async -> Bool {
+        var commands: [String] = []
+        if entry.isIntentToAdd {
+            commands.append(
+                "--literal-pathspecs rm --cached -f -- "
+                    + Self.shellQuote(entry.path)
+            )
+            commands.append(
+                "--literal-pathspecs clean -f -- "
+                    + Self.shellQuote(entry.path)
+            )
+        } else if entry.isUntracked || entry.isWorktreeCopy {
+            commands.append(
+                "--literal-pathspecs clean -f -- "
+                    + Self.shellQuote(entry.path)
+            )
+        } else if entry.isWorktreeRename,
+                  let originalPath = entry.originalPath {
+            commands.append(
+                "--literal-pathspecs restore --worktree -- "
+                    + Self.shellQuote(originalPath)
+            )
+            commands.append(
+                "--literal-pathspecs clean -f -- "
+                    + Self.shellQuote(entry.path)
+            )
+        } else {
+            commands.append(
+                "--literal-pathspecs restore --worktree -- "
+                    + Self.shellQuote(entry.path)
+            )
+        }
+        return await runGitAction(
+            label: "Discard \(entry.fileName)",
+            commands: commands
+        )
+    }
+
+    @discardableResult
+    func discardChanges(_ entries: [RemoteGitEntry]) async -> Bool {
+        guard !entries.isEmpty else {
+            return failGitAction("There are no changes to discard.")
+        }
+        let intentToAdd = entries.filter(\.isIntentToAdd)
+        let moved = entries.filter {
+            $0.isWorktreeRename || $0.isWorktreeCopy
+        }
+        let untracked = entries.filter(\.isUntracked).map(\.path)
+            + moved.map(\.path)
+        let tracked = entries.filter {
+            !$0.isUntracked
+                && !$0.isWorktreeRename
+                && !$0.isWorktreeCopy
+        }.map(\.path)
+            + moved.filter(\.isWorktreeRename)
+                .compactMap(\.originalPath)
+        var commands: [String] = []
+        if !tracked.isEmpty {
+            commands.append(
+                "--literal-pathspecs restore --worktree -- "
+                    + Self.shellArguments(tracked)
+            )
+        }
+        if !intentToAdd.isEmpty {
+            commands.append(
+                "--literal-pathspecs rm --cached -f -- "
+                    + Self.shellArguments(intentToAdd.map(\.path))
+            )
+        }
+        if !untracked.isEmpty {
+            commands.append(
+                "--literal-pathspecs clean -f -- "
+                    + Self.shellArguments(untracked)
+            )
+        }
+        return await runGitAction(
+            label: "Discard reviewed changes",
+            commands: commands
+        )
+    }
+
+    @discardableResult
+    func commit(
+        message: String,
+        includeAll: Bool,
+        amend: Bool = false
+    ) async -> Bool {
+        guard let git else {
+            return failGitAction("Repository changed; refresh and try again.")
+        }
+        let message = message.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !message.isEmpty else {
+            return failGitAction("Enter a commit message.")
+        }
+        guard includeAll || !git.staged.isEmpty || amend else {
+            return failGitAction("Stage changes before committing.")
+        }
+        var commands: [String] = []
+        if includeAll {
+            commands.append("add -A")
+        }
+        var commit = "commit"
+        if amend {
+            commit += " --amend"
+        }
+        commit += " -m \(Self.shellQuote(message))"
+        commands.append(commit)
+        return await runGitAction(
+            label: amend
+                ? "Amend commit"
+                : (includeAll
+                    ? "Stage all and commit"
+                    : "Commit staged changes"),
+            commands: commands
+        )
+    }
+
+    @discardableResult
+    func fetch() async -> Bool {
+        guard let git, !git.remotes.isEmpty else {
+            return failGitAction("No Git remote is configured.")
+        }
+        return await runGitAction(
+            label: "Fetch",
+            commands: ["fetch --all --prune"],
+            requiresStableHead: false
+        )
+    }
+
+    @discardableResult
+    func pull() async -> Bool {
+        guard git?.upstream != nil else {
+            return failGitAction(
+                "This branch has no upstream to pull from."
+            )
+        }
+        return await runGitAction(
+            label: "Pull",
+            commands: ["pull --ff-only"],
+            requiresStableUpstream: true
+        )
+    }
+
+    @discardableResult
+    func push(to remote: String? = nil) async -> Bool {
+        guard let git else {
+            return failGitAction("Repository changed; refresh and try again.")
+        }
+        if git.branch == "Detached HEAD" {
+            return failGitAction(
+                "Create or switch to a branch before pushing."
+            )
+        }
+        if git.upstream != nil {
+            return await runGitAction(
+                label: "Push",
+                commands: ["push"],
+                requiresStableUpstream: true
+            )
+        }
+        let selectedRemote: String
+        if let remote {
+            guard git.remotes.contains(remote) else {
+                return failGitAction(
+                    "The selected Git remote is no longer available."
+                )
+            }
+            selectedRemote = remote
+        } else if git.remotes.count == 1,
+                  let remote = git.remotes.first {
+            selectedRemote = remote
+        } else {
+            return failGitAction(
+                git.remotes.isEmpty
+                    ? "Add a Git remote before publishing this branch."
+                    : "Choose which remote should receive this branch."
+            )
+        }
+        return await runGitAction(
+            label: "Publish branch",
+            commands: [
+                "push -u \(Self.shellQuote(selectedRemote)) HEAD"
+            ]
+        )
+    }
+
+    @discardableResult
+    func syncChanges() async -> Bool {
+        guard let git else {
+            return failGitAction("Repository changed; refresh and try again.")
+        }
+        if git.upstream != nil {
+            return await runGitAction(
+                label: "Sync changes",
+                commands: ["pull --ff-only", "push"],
+                requiresStableUpstream: true
+            )
+        }
+        return await push()
+    }
+
+    @discardableResult
+    func switchBranch(to branch: String) async -> Bool {
+        guard branch != git?.branch else {
+            return true
+        }
+        return await runGitAction(
+            label: "Switch to \(branch)",
+            commands: ["switch \(Self.shellQuote(branch))"]
+        )
+    }
+
+    @discardableResult
+    func createBranch(named rawName: String) async -> Bool {
+        let name = rawName.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !name.isEmpty else {
+            return failGitAction("Enter a branch name.")
+        }
+        return await runGitAction(
+            label: "Create branch \(name)",
+            commands: ["switch -c \(Self.shellQuote(name))"]
+        )
+    }
+
+    @discardableResult
+    func stash(includeUntracked: Bool = true) async -> Bool {
+        guard let git, git.totalChangeCount > 0 else {
+            return failGitAction("There are no changes to stash.")
+        }
+        return await runGitAction(
+            label: "Stash changes",
+            commands: [
+                includeUntracked
+                    ? "stash push --include-untracked"
+                    : "stash push"
+            ]
+        )
+    }
+
+    @discardableResult
+    func popStash() async -> Bool {
+        guard let git, git.stashCount > 0 else {
+            return failGitAction("There are no stashes to pop.")
+        }
+        return await runGitAction(
+            label: "Pop stash",
+            commands: ["stash pop"]
         )
     }
 
@@ -276,15 +699,53 @@ final class RemoteProjectModel: ObservableObject {
         guard let root = git?.repositoryRoot ?? projectRoot else {
             throw RemoteProjectError.invalidDirectory
         }
-        let cached = staged ? "--cached " : ""
+        let arguments: String
+        let acceptsDifferenceExitStatus: Bool
+        if entry.isUntracked && !staged {
+            arguments = "diff --no-index --no-ext-diff --no-color -- "
+                + "/dev/null \(Self.shellQuote(entry.path))"
+            acceptsDifferenceExitStatus = true
+        } else {
+            arguments = "diff --no-ext-diff --no-color "
+                + (staged ? "--cached " : "")
+                + "-- \(Self.shellQuote(entry.path))"
+            acceptsDifferenceExitStatus = false
+        }
         let result = try await execute(
-            "git -C \(Self.shellQuote(root)) diff --no-ext-diff --no-color "
-                + cached + "-- \(Self.shellQuote(entry.path))"
+            Self.gitCommand(root: root, arguments: arguments)
+        )
+        guard result.exitStatus == 0
+                || (acceptsDifferenceExitStatus
+                    && result.exitStatus == 1) else {
+            throw Self.commandError(result)
+        }
+        return result.stdoutString
+    }
+
+    func loadCommit(_ commit: RemoteGitCommit) async throws -> String {
+        guard let root = git?.repositoryRoot ?? projectRoot else {
+            throw RemoteProjectError.invalidDirectory
+        }
+        let result = try await execute(
+            Self.gitCommand(
+                root: root,
+                arguments: "show --no-ext-diff --no-color --stat "
+                    + "--format=fuller --max-count=1 "
+                    + Self.shellQuote(commit.hash)
+            )
         )
         guard result.exitStatus == 0 else {
             throw Self.commandError(result)
         }
         return result.stdoutString
+    }
+
+    func dismissGitOperation() {
+        guard gitOperation?.isRunning != true else {
+            return
+        }
+        gitOperation = nil
+        gitError = nil
     }
 
     #if DEBUG
@@ -351,6 +812,7 @@ final class RemoteProjectModel: ObservableObject {
         hasLoadedGit = false
         canInitializeGit = false
         gitError = nil
+        gitOperation = nil
     }
 
     private func waitForContext() async {
@@ -432,25 +894,181 @@ final class RemoteProjectModel: ObservableObject {
         }
     }
 
-    private func runGitAction(arguments: String) async {
-        guard let root = git?.repositoryRoot ?? projectRoot else {
-            gitError = RemoteProjectError.invalidDirectory.localizedDescription
-            return
+    @discardableResult
+    private func runGitAction(
+        label: String,
+        commands: [String],
+        root requestedRoot: String? = nil,
+        validateSnapshot: Bool = true,
+        requiresStableHead: Bool = true,
+        requiresStableUpstream: Bool = false
+    ) async -> Bool {
+        guard !commands.isEmpty else {
+            return false
         }
+        guard !isRunningGitAction else {
+            return false
+        }
+        guard let root = requestedRoot
+                ?? git?.repositoryRoot
+                ?? projectRoot else {
+            return failGitAction(
+                RemoteProjectError.invalidDirectory.localizedDescription
+            )
+        }
+        let generation = contextGeneration
+        let snapshot = git
         isRunningGitAction = true
         gitError = nil
-        defer { isRunningGitAction = false }
+        gitOperation = RemoteGitOperation(
+            id: UUID(),
+            label: label,
+            state: .running,
+            output: ""
+        )
+        let operationID = gitOperation?.id
+        defer {
+            isRunningGitAction = false
+        }
+        var transcript: [String] = []
         do {
-            let result = try await execute(
-                "git -C \(Self.shellQuote(root)) \(arguments)"
-            )
-            guard result.exitStatus == 0 else {
-                throw Self.commandError(result)
+            if validateSnapshot {
+                guard let snapshot else {
+                    throw RemoteProjectError.commandFailed(
+                        "Repository changed; refresh and try again."
+                    )
+                }
+                try await validateRepository(
+                    snapshot,
+                    requiresStableHead: requiresStableHead,
+                    requiresStableUpstream: requiresStableUpstream
+                )
             }
+            for arguments in commands {
+                guard contextGeneration == generation,
+                      projectRoot == root else {
+                    throw RemoteProjectError.commandFailed(
+                        "Repository changed while the Git action was running."
+                    )
+                }
+                transcript.append("$ git \(arguments)")
+                let result = try await execute(
+                    Self.gitCommand(root: root, arguments: arguments)
+                )
+                let output = [
+                    result.stdoutString,
+                    result.stderrString,
+                ]
+                    .map {
+                        $0.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        )
+                    }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: "\n")
+                if !output.isEmpty {
+                    transcript.append(output)
+                }
+                guard result.exitStatus == 0 else {
+                    throw RemoteProjectError.commandFailed(
+                        output.isEmpty
+                            ? "Git command failed with status "
+                                + "\(result.exitStatus)."
+                            : output
+                    )
+                }
+            }
+            guard contextGeneration == generation else {
+                throw RemoteProjectError.commandFailed(
+                    "Repository changed while the Git action was running."
+                )
+            }
+            gitOperation = RemoteGitOperation(
+                id: operationID ?? UUID(),
+                label: label,
+                state: .succeeded,
+                output: transcript.isEmpty
+                    ? "Completed successfully."
+                    : transcript.joined(separator: "\n")
+            )
             await refreshGit()
+            return true
         } catch {
             gitError = error.localizedDescription
+            if transcript.last != error.localizedDescription {
+                transcript.append(error.localizedDescription)
+            }
+            gitOperation = RemoteGitOperation(
+                id: operationID ?? UUID(),
+                label: label,
+                state: .failed,
+                output: transcript.joined(separator: "\n")
+            )
+            await refreshGit()
+            return false
         }
+    }
+
+    private func validateRepository(
+        _ snapshot: RemoteGitSnapshot,
+        requiresStableHead: Bool,
+        requiresStableUpstream: Bool
+    ) async throws {
+        let rootResult = try await execute(
+            Self.gitCommand(
+                root: snapshot.repositoryRoot,
+                arguments: "rev-parse --show-toplevel"
+            )
+        )
+        guard rootResult.exitStatus == 0,
+              Self.normalizedDirectory(rootResult.stdoutString)
+                == snapshot.repositoryRoot else {
+            throw RemoteProjectError.commandFailed(
+                "Repository changed before the Git action could run."
+            )
+        }
+        guard requiresStableHead || requiresStableUpstream else {
+            return
+        }
+        let status = try await execute(
+            Self.gitCommand(
+                root: snapshot.repositoryRoot,
+                arguments: "status --porcelain=v2 --branch -z "
+                    + "--untracked-files=no"
+            )
+        )
+        guard status.exitStatus == 0 else {
+            throw Self.commandError(status)
+        }
+        let current = Self.parseGitStatus(
+            status.stdout,
+            repositoryRoot: snapshot.repositoryRoot
+        )
+        guard !requiresStableHead
+                || (current.headOID == snapshot.headOID
+                    && current.branch == snapshot.branch) else {
+            throw RemoteProjectError.commandFailed(
+                "Branch or HEAD changed before the Git action could run."
+            )
+        }
+        guard !requiresStableUpstream
+                || current.upstream == snapshot.upstream else {
+            throw RemoteProjectError.commandFailed(
+                "Upstream changed before the Git action could run."
+            )
+        }
+    }
+
+    @discardableResult
+    private func failGitAction(_ message: String) -> Bool {
+        gitError = message
+        gitOperation = RemoteGitOperation(
+            id: UUID(),
+            label: "Git action",
+            state: .failed,
+            output: message
+        )
+        return false
     }
 
     private static func directoryListingCommand(_ directory: String) -> String {
@@ -507,6 +1125,8 @@ final class RemoteProjectModel: ObservableObject {
     ) -> RemoteGitSnapshot {
         let records = data.split(separator: 0, omittingEmptySubsequences: true)
         var branch = "Detached HEAD"
+        var headOID: String?
+        var hasHead = true
         var upstream: String?
         var ahead = 0
         var behind = 0
@@ -515,10 +1135,36 @@ final class RemoteProjectModel: ObservableObject {
 
         for bytes in records {
             if skipRenameSource {
+                if let renamed = entries.popLast() {
+                    entries.append(
+                        RemoteGitEntry(
+                            path: renamed.path,
+                            stagedStatus: renamed.stagedStatus,
+                            worktreeStatus: renamed.worktreeStatus,
+                            originalPath: String(
+                                decoding: bytes,
+                                as: UTF8.self
+                            )
+                        )
+                    )
+                }
                 skipRenameSource = false
                 continue
             }
             let record = String(decoding: bytes, as: UTF8.self)
+            if record.hasPrefix("# branch.oid ") {
+                let value = String(
+                    record.dropFirst("# branch.oid ".count)
+                )
+                if value == "(initial)" {
+                    headOID = nil
+                    hasHead = false
+                } else {
+                    headOID = value
+                    hasHead = true
+                }
+                continue
+            }
             if record.hasPrefix("# branch.head ") {
                 branch = String(record.dropFirst("# branch.head ".count))
                 if branch == "(detached)" {
@@ -560,7 +1206,7 @@ final class RemoteProjectModel: ObservableObject {
                 parsed = values.count == 10
                     ? statusEntry(xy: values[1], path: values[9])
                     : nil
-                skipRenameSource = true
+                skipRenameSource = parsed != nil
             } else if record.hasPrefix("u ") {
                 let values = record.split(
                     separator: " ",
@@ -593,10 +1239,86 @@ final class RemoteProjectModel: ObservableObject {
         return RemoteGitSnapshot(
             repositoryRoot: repositoryRoot,
             branch: branch,
+            headOID: headOID,
+            hasHead: hasHead,
             upstream: upstream,
             ahead: ahead,
             behind: behind,
             entries: entries
+        )
+    }
+
+    static func parseRepositoryDetails(
+        _ data: Data,
+        snapshot: RemoteGitSnapshot
+    ) -> RemoteGitSnapshot {
+        var branches: [String] = []
+        var remotes: [String] = []
+        var commits: [RemoteGitCommit] = []
+        var repositoryOperation: String?
+        var stashCount = 0
+
+        for line in String(decoding: data, as: UTF8.self)
+            .split(separator: "\n", omittingEmptySubsequences: true) {
+            let values = line.split(
+                separator: "\t",
+                maxSplits: 5,
+                omittingEmptySubsequences: false
+            )
+            guard let kind = values.first else {
+                continue
+            }
+            switch kind {
+            case "B" where values.count >= 2:
+                branches.append(String(values[1]))
+            case "R" where values.count >= 2:
+                remotes.append(String(values[1]))
+            case "C" where values.count >= 6:
+                guard let timestamp = TimeInterval(values[3]) else {
+                    continue
+                }
+                commits.append(
+                    RemoteGitCommit(
+                        hash: String(values[1]),
+                        shortHash: String(values[2]),
+                        subject: String(values[5]),
+                        author: String(values[4]),
+                        date: Date(timeIntervalSince1970: timestamp)
+                    )
+                )
+            case "S" where values.count >= 2:
+                stashCount = Int(values[1]) ?? 0
+            case "O" where values.count >= 2:
+                repositoryOperation = String(values[1])
+            default:
+                continue
+            }
+        }
+
+        branches = Array(Set(branches)).sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+        remotes = Array(Set(remotes)).sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+        if !branches.contains(snapshot.branch),
+           snapshot.branch != "Detached HEAD" {
+            branches.insert(snapshot.branch, at: 0)
+        }
+        return RemoteGitSnapshot(
+            repositoryRoot: snapshot.repositoryRoot,
+            branch: snapshot.branch,
+            headOID: snapshot.headOID,
+            hasHead: snapshot.hasHead,
+            upstream: snapshot.upstream,
+            ahead: snapshot.ahead,
+            behind: snapshot.behind,
+            entries: snapshot.entries,
+            branches: branches,
+            remotes: remotes,
+            recentCommits: commits,
+            repositoryOperation: repositoryOperation,
+            stashCount: stashCount
         )
     }
 
@@ -628,6 +1350,49 @@ final class RemoteProjectModel: ObservableObject {
 
     private static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func shellArguments(_ values: [String]) -> String {
+        values.map(shellQuote).joined(separator: " ")
+    }
+
+    private static func gitCommand(
+        root: String,
+        arguments: String
+    ) -> String {
+        "env LC_ALL=C GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 "
+            + "git -C \(shellQuote(root)) \(arguments)"
+    }
+
+    private static func repositoryDetailsCommand(_ root: String) -> String {
+        let script = """
+        root=$1
+        git -C "$root" for-each-ref \
+          --format='B\t%(refname:short)' refs/heads 2>/dev/null || true
+        git -C "$root" remote 2>/dev/null |
+          while IFS= read -r value; do printf 'R\t%s\n' "$value"; done
+        git -C "$root" log -10 --date=unix \
+          --format='C%x09%H%x09%h%x09%at%x09%an%x09%s' \
+          2>/dev/null || true
+        count=$(git -C "$root" stash list --format='%gd' 2>/dev/null |
+          wc -l | tr -d ' ')
+        printf 'S\t%s\n' "$count"
+        git_dir=$(git -C "$root" rev-parse --absolute-git-dir 2>/dev/null ||
+          true)
+        if [ -n "$git_dir" ]; then
+          if [ -f "$git_dir/MERGE_HEAD" ]; then
+            printf 'O\tMerging\n'
+          elif [ -d "$git_dir/rebase-merge" ] ||
+               [ -d "$git_dir/rebase-apply" ]; then
+            printf 'O\tRebasing\n'
+          elif [ -f "$git_dir/CHERRY_PICK_HEAD" ]; then
+            printf 'O\tCherry-picking\n'
+          elif [ -f "$git_dir/REVERT_HEAD" ]; then
+            printf 'O\tReverting\n'
+          fi
+        fi
+        """
+        return "/bin/sh -c \(shellQuote(script)) sh \(shellQuote(root))"
     }
 
     private static func commandError(
