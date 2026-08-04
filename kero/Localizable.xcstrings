@@ -294,6 +294,12 @@
         }
       }
     },
+    "%lld open" : {
+
+    },
+    "%lld open sessions" : {
+
+    },
     "%lld outgoing commits" : {
       "localizations" : {
         "en" : {
@@ -708,6 +714,9 @@
           }
         }
       }
+    },
+    "Bare repository" : {
+
     },
     "Binary file" : {
       "localizations" : {
@@ -1663,6 +1672,9 @@
         }
       }
     },
+    "Copy Worktree Path" : {
+
+    },
     "Could not enter interactive terminal mode." : {
       "localizations" : {
         "ja" : {
@@ -1939,6 +1951,9 @@
         }
       }
     },
+    "current worktree" : {
+
+    },
     "Dark" : {
       "comment" : "Dark app appearance.",
       "localizations" : {
@@ -2037,6 +2052,9 @@
           }
         }
       }
+    },
+    "Detached at %@" : {
+
     },
     "detached HEAD" : {
       "localizations" : {
@@ -3499,6 +3517,12 @@
         }
       }
     },
+    "locked" : {
+
+    },
+    "locked, %@" : {
+
+    },
     "Lower memory footprint" : {
       "localizations" : {
         "ja" : {
@@ -4425,6 +4449,9 @@
     "Open Link in New Window" : {
 
     },
+    "Open the worktree using this branch" : {
+
+    },
     "Open to the Side" : {
       "localizations" : {
         "ja" : {
@@ -4440,6 +4467,9 @@
           }
         }
       }
+    },
+    "Open Worktree" : {
+
     },
     "Opens changes" : {
       "localizations" : {
@@ -4472,6 +4502,9 @@
           }
         }
       }
+    },
+    "Opens or reveals this worktree as a Kero project" : {
+
     },
     "Paste" : {
       "localizations" : {
@@ -4728,6 +4761,12 @@
           }
         }
       }
+    },
+    "prunable" : {
+
+    },
+    "prunable, %@" : {
+
     },
     "Publish branch" : {
       "localizations" : {
@@ -5488,6 +5527,9 @@
         }
       }
     },
+    "Reveal Worktree in Finder" : {
+
+    },
     "Revert in progress" : {
       "localizations" : {
         "ja" : {
@@ -5844,6 +5886,9 @@
       }
     },
     "Shows files changed in this commit" : {
+
+    },
+    "Shows or hides Git worktrees" : {
 
     },
     "Shows the toolbar in every project" : {
@@ -6682,6 +6727,9 @@
         }
       }
     },
+    "This worktree cannot be opened" : {
+
+    },
     "Toggle Files Panel" : {
       "localizations" : {
         "ja" : {
@@ -7342,6 +7390,12 @@
           }
         }
       }
+    },
+    "WORKTREES" : {
+
+    },
+    "Worktrees, %lld items" : {
+
     },
     "Wrap lines to editor width" : {
       "localizations" : {
