@@ -1513,6 +1513,14 @@ open class STTextView: NSView, NSTextInput, NSTextContent, STTextViewProtocol {
         #endif
     }
 
+    // kero patch: fixed-line-height consumers (the diff viewer) know the
+    // exact document height up front. TextKit2's estimates for paragraphs it
+    // hasn't laid out — notably long runs of empty lines — undershoot, which
+    // clamps scrolling short of the real end and lets two side-by-side
+    // documents with identical row counts disagree about their height. When
+    // set, this exact height replaces the estimate.
+    public var overrideContentHeight: CGFloat?
+
     func updateContentSizeIfNeeded() {
         let gutterWidth = gutterView?.frame.width ?? 0
         let scrollerInset = scrollView?.contentView.contentInsets.right ?? 0
@@ -1546,6 +1554,10 @@ open class STTextView: NSView, NSTextInput, NSTextContent, STTextViewProtocol {
         textLayoutManager.enumerateTextSegments(in: segmentRange, type: .standard, options: .middleFragmentsExcluded) { _, rect, _, _ in
             estimatedSize.height = max(estimatedSize.height, rect.origin.y + rect.size.height)
             return true
+        }
+        // kero patch: an exact known height wins over the estimate above.
+        if let overrideContentHeight {
+            estimatedSize.height = overrideContentHeight
         }
 
         if !isHorizontallyResizable {
@@ -1592,6 +1604,12 @@ open class STTextView: NSView, NSTextInput, NSTextContent, STTextViewProtocol {
             lastLineMaxY = rect.origin.y + rect.size.height
             return true
         }
+        // kero patch: never shrink below an exact known height (see
+        // overrideContentHeight) — end-of-document relocation otherwise bakes
+        // the estimate error into the frame.
+        if let overrideContentHeight {
+            lastLineMaxY = max(lastLineMaxY, overrideContentHeight)
+        }
 
         if !lastLineMaxY.isAlmostEqual(to: frame.height) {
             setFrameSize(CGSize(width: frame.width, height: lastLineMaxY))
@@ -1632,6 +1650,14 @@ open class STTextView: NSView, NSTextInput, NSTextContent, STTextViewProtocol {
         textCheckingDidChangeText(in: NSRange(textRange, in: textContentManager))
     }
 
+    // kero patch: after a text change, the deferred scroll below follows the
+    // caret. A read-only view whose whole document is swapped programmatically
+    // (kero's diff panes on fold expansion) has its selection collapse to the
+    // document start, so that follow-scroll yanks the view to the top and
+    // undoes the caller's restored scroll position. Such views opt out; the
+    // default keeps the type-and-follow behavior for editors.
+    public var scrollsSelectionToVisibleOnTextChange = true
+
     /// Sends out necessary notifications when a text change completes.
     ///
     /// Invoked automatically at the end of a series of changes, this method posts an `textDidChangeNotification` to the default notification center, which also results in the delegate receiving `textViewDidChangeText(_:)` message.
@@ -1646,9 +1672,11 @@ open class STTextView: NSView, NSTextInput, NSTextContent, STTextViewProtocol {
 
         NSAccessibility.post(element: self, notification: .valueChanged)
 
-        postLayoutAction = { [weak self] in
-            guard let self, let textRange = textLayoutManager.textSelections.last?.textRanges.last else { return }
-            scrollToVisible(textRange, type: .standard)
+        if scrollsSelectionToVisibleOnTextChange {
+            postLayoutAction = { [weak self] in
+                guard let self, let textRange = textLayoutManager.textSelections.last?.textRanges.last else { return }
+                scrollToVisible(textRange, type: .standard)
+            }
         }
         needsDisplay = true
     }

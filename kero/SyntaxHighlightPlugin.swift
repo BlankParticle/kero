@@ -118,6 +118,52 @@ enum HighlightQueryCache {
     }
 }
 
+/// Resolution from tree-sitter capture names to theme colors, shared by the
+/// live editor plugin and the diff viewer's offline highlight pass so both
+/// produce identical colors.
+enum SyntaxCaptureStyle {
+    /// tree-sitter capture names that carry no color — spell-check hints,
+    /// concealment, and the explicit "no highlight" marker. Grammars attach
+    /// these alongside real captures (e.g. Swift's `@comment @spell`), so they
+    /// must be dropped rather than resolved to a color.
+    static let ignoredCaptures: Set<String> = ["spell", "nospell", "conceal", "none"]
+
+    /// The theme color for a tree-sitter capture name, trying the most specific
+    /// name first and shortening on each dot (`variable.parameter` → `variable`),
+    /// then the theme's `plain` default. The merged queries carry finer-grained
+    /// capture names than the theme enumerates, so exact-match alone would leave
+    /// many tokens uncolored.
+    static func color(for name: String, theme: STPluginNeonAppKit.Theme) -> NSColor? {
+        var key = name
+        while true {
+            if let color = theme.color(forToken: TokenName(key)) {
+                return color
+            }
+            if let alias = captureAliases[key], let color = theme.color(forToken: TokenName(alias)) {
+                return color
+            }
+            guard let dot = key.lastIndex(of: ".") else { break }
+            key = String(key[..<dot])
+        }
+        return theme.color(forToken: "plain")
+    }
+
+    /// Capture names the theme's palette has no entry for, redirected onto ones
+    /// it does. The palette is a fixed list that predates markup grammars, so
+    /// `@tag` and `@attribute` — which carry most of the color in a JSX or HTML
+    /// file — would otherwise walk straight to the `plain` fallback and leave
+    /// every element name and prop the same black as the text around it.
+    private static let captureAliases: [String: String] = [
+        // Capitalized JSX components already reach `@constructor` through the
+        // JavaScript query's `^[A-Z]` rule, so lowercase intrinsics match them
+        // and `<main>` looks like `<Sidebar>`.
+        "tag": "constructor",
+        // The theme ships a `property` color but leaves it out of the palette;
+        // `method` is the same value and does make the list.
+        "attribute": "method",
+    ]
+}
+
 @MainActor
 final class SyntaxHighlightCoordinator {
     private var highlighter: Neon.Highlighter?
@@ -171,12 +217,12 @@ final class SyntaxHighlightCoordinator {
             // a real capture on the same range. Swift captures comments as
             // `@comment @spell`; letting `spell` through (it resolves to the
             // plain fallback, applied after `comment`) turned comments black.
-            guard let textView, !Self.ignoredCaptures.contains(neonToken.name) else {
+            guard let textView, !SyntaxCaptureStyle.ignoredCaptures.contains(neonToken.name) else {
                 return nil
             }
             var attributes: [NSAttributedString.Key: Any] = [:]
             attributes[.font] = textView.font
-            if let color = Self.themeColor(for: neonToken.name, theme: theme) {
+            if let color = SyntaxCaptureStyle.color(for: neonToken.name, theme: theme) {
                 attributes[.foregroundColor] = color
             }
             if let font = theme.font(forToken: TokenName(neonToken.name)) {
@@ -203,47 +249,6 @@ final class SyntaxHighlightCoordinator {
 
         installTokenProvider(textContentManager: textView.textContentManager)
     }
-
-    /// tree-sitter capture names that carry no color — spell-check hints,
-    /// concealment, and the explicit "no highlight" marker. Grammars attach
-    /// these alongside real captures (e.g. Swift's `@comment @spell`), so they
-    /// must be dropped rather than resolved to a color.
-    private static let ignoredCaptures: Set<String> = ["spell", "nospell", "conceal", "none"]
-
-    /// The theme color for a tree-sitter capture name, trying the most specific
-    /// name first and shortening on each dot (`variable.parameter` → `variable`),
-    /// then the theme's `plain` default. The merged queries carry finer-grained
-    /// capture names than the theme enumerates, so exact-match alone would leave
-    /// many tokens uncolored.
-    private static func themeColor(for name: String, theme: STPluginNeonAppKit.Theme) -> NSColor? {
-        var key = name
-        while true {
-            if let color = theme.color(forToken: TokenName(key)) {
-                return color
-            }
-            if let alias = captureAliases[key], let color = theme.color(forToken: TokenName(alias)) {
-                return color
-            }
-            guard let dot = key.lastIndex(of: ".") else { break }
-            key = String(key[..<dot])
-        }
-        return theme.color(forToken: "plain")
-    }
-
-    /// Capture names the theme's palette has no entry for, redirected onto ones
-    /// it does. The palette is a fixed list that predates markup grammars, so
-    /// `@tag` and `@attribute` — which carry most of the color in a JSX or HTML
-    /// file — would otherwise walk straight to the `plain` fallback and leave
-    /// every element name and prop the same black as the text around it.
-    private static let captureAliases: [String: String] = [
-        // Capitalized JSX components already reach `@constructor` through the
-        // JavaScript query's `^[A-Z]` rule, so lowercase intrinsics match them
-        // and `<main>` looks like `<Sidebar>`.
-        "tag": "constructor",
-        // The theme ships a `property` color but leaves it out of the palette;
-        // `method` is the same value and does make the list.
-        "attribute": "method",
-    ]
 
     /// Install the highlighter's token provider. If the language's query is
     /// already compiled, this is synchronous (instant); otherwise the compile —
@@ -386,7 +391,7 @@ final class SyntaxHighlightCoordinator {
         let offset = injectionRange.location
         var tokens: [Neon.Token] = []
         for named in query.execute(node: root, in: tree).resolve(with: context).highlights() {
-            guard named.range.length > 0, !Self.ignoredCaptures.contains(named.name) else { continue }
+            guard named.range.length > 0, !SyntaxCaptureStyle.ignoredCaptures.contains(named.name) else { continue }
             let range = NSRange(location: named.range.location + offset, length: named.range.length)
             tokens.append(Neon.Token(name: named.name, range: range))
         }

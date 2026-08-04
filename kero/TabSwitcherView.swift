@@ -760,10 +760,10 @@ private struct TabPaneThumbnail: View {
 
     private func diffPreview(_ diff: DiffTab) -> some View {
         HStack(spacing: 1) {
-            Text(textExcerpt(diff.web.oldContent))
+            Text(textExcerpt(diff.oldContent))
                 .foregroundStyle(Color.red.opacity(0.76))
                 .background(Color.red.opacity(0.07))
-            Text(textExcerpt(diff.web.newContent))
+            Text(textExcerpt(diff.newContent))
                 .foregroundStyle(Color.green.opacity(0.76))
                 .background(Color.green.opacity(0.07))
         }

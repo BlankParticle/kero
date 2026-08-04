@@ -378,6 +378,9 @@
         }
       }
     },
+    "%lld unmodified lines" : {
+      "comment" : "Separator row standing in for folded context lines in a diff."
+    },
     "`kero +themes` needs an interactive terminal. Use `kero +themes --list` to print theme names." : {
       "localizations" : {
         "ja" : {
@@ -435,6 +438,9 @@
           }
         }
       }
+    },
+    "1 unmodified line" : {
+      "comment" : "Separator row standing in for one folded context line in a diff."
     },
     "A name can’t contain “/” or be “.” or “..”." : {
       "localizations" : {
@@ -2070,6 +2076,9 @@
         }
       }
     },
+    "Diff gutter" : {
+      "comment" : "Accessibility label for the diff view's line-number column."
+    },
     "Diff Layout" : {
       "localizations" : {
         "ja" : {
@@ -2434,6 +2443,9 @@
           }
         }
       }
+    },
+    "Expand %@" : {
+      "comment" : "Accessibility action for a folded run of context lines in a diff."
     },
     "Expanded" : {
       "localizations" : {

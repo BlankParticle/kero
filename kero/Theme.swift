@@ -309,6 +309,13 @@ nonisolated extension GhosttyThemeDefinition {
             ?? backgroundNSColor
     }
 
+    /// An ANSI palette entry as a color, or nil when the theme doesn't define
+    /// that slot. The diff viewer derives its added/removed tints from ANSI
+    /// green and red so they follow the selected theme.
+    func paletteNSColor(_ index: Int) -> NSColor? {
+        palette[index].map(Self.nsColor)
+    }
+
     private static func nsColor(_ hex: String) -> NSColor {
         let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
         guard digits.count == 6, let value = Int(digits, radix: 16) else {

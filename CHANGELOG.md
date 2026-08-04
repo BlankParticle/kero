@@ -16,6 +16,7 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Native diff viewer: diffs now render instantly in the same engine as the editor — themed with your terminal colors and font, with unified and side-by-side layouts, per-side syntax highlighting, word-level change emphasis, and ⌘F search inside diffs. Long unmodified stretches fold into an expandable "N unmodified lines" row so a diff opens right at the changes
 - Edit live worktree changes directly in the diff view, with remembered Review/Edit and Unified/Split controls plus normal save/discard handling
 - Fix modified special keys and application-keypad input in Alacritty terminals, including Shift-Enter for multiline prompts in Claude Code
 - Fix: Show a green Clean status for unchanged repositories and include untracked files in the toolbar's added-line count
