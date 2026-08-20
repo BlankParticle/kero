@@ -447,7 +447,6 @@ enum KeroAutomationRouter {
         let contentKind: String = switch context.pane.content {
         case .session: "terminal"
         case .file: "file"
-        case .browser: "browser"
         case .diff: "diff"
         }
         var object: [String: KeroJSONValue] = [

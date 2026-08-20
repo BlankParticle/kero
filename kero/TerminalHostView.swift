@@ -18,8 +18,6 @@ struct TerminalHostView: NSViewRepresentable {
     var onFocused: () -> Void = {}
     /// Splits this pane on the given edge — wired to the context-menu items.
     var onSplit: (PaneDropEdge) -> Void = { _ in }
-    var onNewBrowserTab: (String?) -> Void = { _ in }
-    var onNewBrowserPane: (String?) -> Void = { _ in }
     var onNewFileTab: (String) -> Void = { _ in }
     var onNewFilePane: (String) -> Void = { _ in }
 
@@ -32,8 +30,6 @@ struct TerminalHostView: NSViewRepresentable {
         let terminal = session.surface
         terminal.onBecomeFirstResponder = onFocused
         terminal.splitTarget.onSplit = onSplit
-        terminal.splitTarget.onNewBrowserTab = onNewBrowserTab
-        terminal.splitTarget.onNewBrowserPane = onNewBrowserPane
         terminal.splitTarget.onNewFileTab = onNewFileTab
         terminal.splitTarget.onNewFilePane = onNewFilePane
         let scrollbar = session.overlayScrollbar
@@ -69,8 +65,6 @@ struct TerminalHostView: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         session.surface.onBecomeFirstResponder = onFocused
         session.surface.splitTarget.onSplit = onSplit
-        session.surface.splitTarget.onNewBrowserTab = onNewBrowserTab
-        session.surface.splitTarget.onNewBrowserPane = onNewBrowserPane
         session.surface.splitTarget.onNewFileTab = onNewFileTab
         session.surface.splitTarget.onNewFilePane = onNewFilePane
         let container = view as? TerminalContainerView
@@ -96,8 +90,6 @@ struct TerminalHostView: NSViewRepresentable {
         // session gets fresh callbacks when its host is recreated.
         terminal.onBecomeFirstResponder = nil
         terminal.splitTarget.onSplit = nil
-        terminal.splitTarget.onNewBrowserTab = nil
-        terminal.splitTarget.onNewBrowserPane = nil
         terminal.splitTarget.onNewFileTab = nil
         terminal.splitTarget.onNewFilePane = nil
         container.terminal = nil

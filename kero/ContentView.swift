@@ -213,12 +213,6 @@ struct ContentView: View {
                                 tab: tab,
                                 tabSplitDrag: tabSplitDrag,
                                 onSplit: { manager.split(toward: $0) },
-                                onNewBrowserTab: {
-                                    manager.newBrowserTab(initialURL: $0)
-                                },
-                                onNewBrowserPane: {
-                                    manager.newBrowserPane(initialURL: $0)
-                                },
                                 onNewFileTab: {
                                     manager.openFile($0)
                                 },
@@ -1283,18 +1277,6 @@ private struct SessionTabsView: View {
             }
             Divider()
         }
-        if case .browser(let browser) = tab.focusedContent,
-           !browser.urlString.isEmpty {
-            Button("Open in Default Browser") {
-                browser.openInDefaultBrowser()
-            }
-            .disabled(browser.shareURL == nil)
-            Button("Copy Address") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(browser.urlString, forType: .string)
-            }
-            Divider()
-        }
         Button("Close") { project.close(tab) }
         Button("Close Others") { project.closeOthers(tab) }
             .disabled(project.tabs.count <= 1)
@@ -1336,7 +1318,6 @@ private struct PaneTabItem: View {
         if renamingTabID == tab.id {
             TabRenameChrome(
                 systemImage: tab.focusedContent?.systemImage ?? "terminal",
-                browserIcon: focusedBrowser,
                 fileIconPath: focusedFileIconPath,
                 initialValue: tab.displayTitle ?? "",
                 commit: { name in
@@ -1351,8 +1332,6 @@ private struct PaneTabItem: View {
                 SessionTabLabel(session: session, customTitle: tab.customName, paneCount: paneCount, agentRollup: tab.agentRollup, isSelected: isSelected, select: select, close: close)
             case .file(let file):
                 FileTabLabel(file: file, customTitle: tab.customName, paneCount: paneCount, agentRollup: tab.agentRollup, isSelected: isSelected, select: select, close: close)
-            case .browser(let browser):
-                BrowserTabLabel(browser: browser, customTitle: tab.customName, paneCount: paneCount, agentRollup: tab.agentRollup, isSelected: isSelected, select: select, close: close)
             case .diff(let diff):
                 DiffTabLabel(
                     diff: diff,
@@ -1369,14 +1348,6 @@ private struct PaneTabItem: View {
         }
     }
 
-    private var focusedBrowser: BrowserTab? {
-        if case .browser(let browser) = tab.focusedContent {
-            browser
-        } else {
-            nil
-        }
-    }
-
     private var focusedFileIconPath: String? {
         tab.focusedContent?.fileIconPath
     }
@@ -1388,7 +1359,6 @@ private struct PaneTabItem: View {
 private struct TabRenameChrome: View {
     @ObservedObject private var themeChanges = Theme.changes
     let systemImage: String
-    let browserIcon: BrowserTab?
     let fileIconPath: String?
     let commit: (String) -> Void
     let end: () -> Void
@@ -1401,14 +1371,12 @@ private struct TabRenameChrome: View {
 
     init(
         systemImage: String,
-        browserIcon: BrowserTab?,
         fileIconPath: String?,
         initialValue: String,
         commit: @escaping (String) -> Void,
         end: @escaping () -> Void
     ) {
         self.systemImage = systemImage
-        self.browserIcon = browserIcon
         self.fileIconPath = fileIconPath
         self.commit = commit
         self.end = end
@@ -1417,11 +1385,7 @@ private struct TabRenameChrome: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            if let browserIcon {
-                BrowserFaviconView(browser: browserIcon, size: 11)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(Color(nsColor: Theme.accent))
-            } else if let fileIconPath {
+            if let fileIconPath {
                 MaterialFileIconView(path: fileIconPath, size: 12)
             } else {
                 Image(systemName: systemImage)
@@ -1508,31 +1472,6 @@ private struct FileTabLabel: View {
     }
 }
 
-private struct BrowserTabLabel: View {
-    @ObservedObject var browser: BrowserTab
-    /// User-assigned tab name overriding the webpage title.
-    var customTitle: String?
-    let paneCount: Int
-    let agentRollup: KeroAgentRollup?
-    let isSelected: Bool
-    let select: () -> Void
-    let close: () -> Void
-
-    var body: some View {
-        TabItemChrome(
-            systemImage: "globe",
-            browserIcon: browser,
-            title: customTitle ?? browser.title,
-            paneCount: paneCount,
-            agentRollup: agentRollup,
-            isSelected: isSelected,
-            select: select,
-            close: close
-        )
-        .help(browser.urlString)
-    }
-}
-
 private struct DiffTabLabel: View {
     @ObservedObject var diff: DiffTab
     var customTitle: String?
@@ -1561,7 +1500,6 @@ private struct DiffTabLabel: View {
 private struct TabItemChrome: View {
     @ObservedObject private var themeChanges = Theme.changes
     let systemImage: String
-    var browserIcon: BrowserTab? = nil
     var fileIconPath: String? = nil
     let title: String
     var paneCount: Int = 1
@@ -1576,16 +1514,7 @@ private struct TabItemChrome: View {
     var body: some View {
         Button(action: select) {
             HStack(spacing: 5) {
-                if let browserIcon {
-                    BrowserFaviconView(browser: browserIcon, size: 11)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(
-                            isSelected
-                                ? AnyShapeStyle(Color(nsColor: Theme.accent))
-                                : AnyShapeStyle(.tertiary)
-                        )
-                        .opacity(isSelected ? 1 : 0.78)
-                } else if let fileIconPath {
+                if let fileIconPath {
                     MaterialFileIconView(
                         path: fileIconPath,
                         size: 12,

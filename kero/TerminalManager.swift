@@ -432,29 +432,6 @@ final class TerminalManager: nonisolated ObservableObject {
         project.newSession()
     }
 
-    /// Opens a browser tab in the current project. Kero remains
-    /// project-oriented, so invoking it from the no-project state first creates
-    /// the normal project shell and places the browser beside it.
-    func newBrowserTab(initialURL: String? = nil) {
-        let project = selectedProject ?? newProject()
-        project.newBrowserTab(
-            initialURL: initialURL,
-            initialFocus: initialURL == nil ? .addressBar : .webContent
-        )
-    }
-
-    /// Opens a browser beside the focused pane in the current tab.
-    func newBrowserPane(
-        toward edge: PaneDropEdge = .right,
-        initialURL: String? = nil
-    ) {
-        selectedProject?.newBrowserPane(
-            toward: edge,
-            initialURL: initialURL,
-            initialFocus: initialURL == nil ? .addressBar : .webContent
-        )
-    }
-
     /// Brings `session` to the foreground: selects its project and tab, then
     /// focuses its pane. Backs the command palette's session switcher; a no-op
     /// if the session is no longer open anywhere.
@@ -563,7 +540,7 @@ final class TerminalManager: nonisolated ObservableObject {
         switch selectedProject?.focusedContent {
         case .session(let session): session.find.perform(action)
         case .file(let file): file.performFindAction(action)
-        case .browser, .diff, .none: break
+        case .diff, .none: break
         }
     }
 
@@ -572,7 +549,7 @@ final class TerminalManager: nonisolated ObservableObject {
     var canFind: Bool {
         switch selectedProject?.focusedContent {
         case .session, .file: return true
-        case .browser, .diff, .none: return false
+        case .diff, .none: return false
         }
     }
 
@@ -638,35 +615,6 @@ final class TerminalManager: nonisolated ObservableObject {
 
     func selectTab(index: Int) {
         selectedProject?.select(index: index)
-    }
-
-    // MARK: - Browser
-
-    private var selectedBrowser: BrowserTab? {
-        if case .browser(let browser)? = selectedProject?.focusedContent {
-            return browser
-        }
-        return nil
-    }
-
-    var hasSelectedBrowser: Bool {
-        selectedBrowser != nil
-    }
-
-    func focusBrowserAddressBar() {
-        selectedBrowser?.requestAddressFocus()
-    }
-
-    func reloadSelectedBrowser() {
-        selectedBrowser?.reload()
-    }
-
-    func stopSelectedBrowser() {
-        selectedBrowser?.stopLoading()
-    }
-
-    func openSelectedPageInDefaultBrowser() {
-        selectedBrowser?.openInDefaultBrowser()
     }
 
     // MARK: - Files
@@ -980,8 +928,6 @@ final class TerminalManager: nonisolated ObservableObject {
             return .session(workingDirectory: session.currentDirectoryPath)
         case .file(let file):
             return .file(path: file.path, editorState: file.editorState)
-        case .browser(let browser):
-            return .browser(url: browser.snapshotURL)
         case .diff(let diff):
             if let commitHash = diff.commitHash {
                 return .commitDiff(

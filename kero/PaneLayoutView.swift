@@ -15,9 +15,6 @@ struct PaneLayoutView: View {
     @ObservedObject private var themeChanges = Theme.changes
     /// Splits the focused pane on the given edge — from a pane's context menu.
     var onSplit: (PaneDropEdge) -> Void = { _ in }
-    /// Browser creation actions exposed by terminal and file-editor menus.
-    var onNewBrowserTab: (String?) -> Void = { _ in }
-    var onNewBrowserPane: (String?) -> Void = { _ in }
     /// File creation actions exposed only for Command-right-clicked paths in
     /// terminal menus.
     var onNewFileTab: (String) -> Void = { _ in }
@@ -79,8 +76,6 @@ struct PaneLayoutView: View {
                     onMove: { _ in },
                     onMoveEnded: {},
                     onSplit: onSplit,
-                    onNewBrowserTab: onNewBrowserTab,
-                    onNewBrowserPane: onNewBrowserPane,
                     onNewFileTab: onNewFileTab,
                     onNewFilePane: onNewFilePane
                 )
@@ -133,8 +128,6 @@ struct PaneLayoutView: View {
                         },
                         onMoveEnded: { commitPaneMove() },
                         onSplit: onSplit,
-                        onNewBrowserTab: onNewBrowserTab,
-                        onNewBrowserPane: onNewBrowserPane,
                         onNewFileTab: onNewFileTab,
                         onNewFilePane: onNewFilePane
                     )
@@ -320,7 +313,6 @@ struct PaneLayoutView: View {
         case .session(let session):
             return session.surface.paneSnapshot()
         case .file(let file): return file.editorView?.paneSnapshot()
-        case .browser(let browser): return browser.webView.paneSnapshot()
         default: return nil
         }
     }
@@ -431,8 +423,6 @@ private struct PaneView: View {
     /// Splits the focused pane on the given edge (from the content's context
     /// menu).
     let onSplit: (PaneDropEdge) -> Void
-    let onNewBrowserTab: (String?) -> Void
-    let onNewBrowserPane: (String?) -> Void
     let onNewFileTab: (String) -> Void
     let onNewFilePane: (String) -> Void
 
@@ -491,16 +481,6 @@ private struct PaneView: View {
         onSplit(edge)
     }
 
-    private func newBrowserTabFromMenu(initialURL: String?) {
-        focus()
-        onNewBrowserTab(initialURL)
-    }
-
-    private func newBrowserPaneFromMenu(initialURL: String?) {
-        focus()
-        onNewBrowserPane(initialURL)
-    }
-
     private func newFileTabFromMenu(path: String) {
         focus()
         onNewFileTab(path)
@@ -520,8 +500,6 @@ private struct PaneView: View {
                 isFocused: isFocused,
                 onFocused: focus,
                 onSplit: splitFromMenu,
-                onNewBrowserTab: newBrowserTabFromMenu,
-                onNewBrowserPane: newBrowserPaneFromMenu,
                 onNewFileTab: newFileTabFromMenu,
                 onNewFilePane: newFilePaneFromMenu
             )
@@ -535,15 +513,6 @@ private struct PaneView: View {
                 isFocused: isFocused,
                 onFocused: focus,
                 onSplit: splitFromMenu
-            )
-                .background(Color(nsColor: Theme.background))
-        case .browser(let browser):
-            BrowserView(
-                browser: browser,
-                isFocused: isFocused,
-                onFocused: focus,
-                onNewBrowserTab: newBrowserTabFromMenu,
-                onNewBrowserPane: newBrowserPaneFromMenu
             )
                 .background(Color(nsColor: Theme.background))
         case .diff:
@@ -706,8 +675,8 @@ private struct PaneHeaderView: View {
 }
 
 /// Per-kind wrappers observe the content object itself so live terminal titles,
-/// browser favicons, file renames and dirty state update without rebuilding the
-/// surrounding pane layout.
+/// file renames and dirty state update without rebuilding the surrounding pane
+/// layout.
 private struct PaneHeaderTitle: View {
     let content: PaneContent
     let isFocused: Bool
@@ -719,8 +688,6 @@ private struct PaneHeaderTitle: View {
             SessionPaneHeaderTitle(session: session, isFocused: isFocused)
         case .file(let file):
             FilePaneHeaderTitle(file: file, isFocused: isFocused)
-        case .browser(let browser):
-            BrowserPaneHeaderTitle(browser: browser, isFocused: isFocused)
         case .diff(let diff):
             PaneHeaderLabel(
                 systemImage: "plus.forwardslash.minus",
@@ -762,24 +729,8 @@ private struct FilePaneHeaderTitle: View {
     }
 }
 
-private struct BrowserPaneHeaderTitle: View {
-    @ObservedObject var browser: BrowserTab
-    let isFocused: Bool
-
-    var body: some View {
-        PaneHeaderLabel(
-            systemImage: "globe",
-            browser: browser,
-            title: browser.title,
-            isFocused: isFocused
-        )
-        .help(browser.urlString)
-    }
-}
-
 private struct PaneHeaderLabel: View {
     let systemImage: String
-    var browser: BrowserTab? = nil
     var fileIconPath: String? = nil
     let title: String
     let isFocused: Bool
@@ -788,10 +739,7 @@ private struct PaneHeaderLabel: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if let browser {
-                BrowserFaviconView(browser: browser, size: 12)
-                    .foregroundStyle(iconStyle)
-            } else if let fileIconPath {
+            if let fileIconPath {
                 MaterialFileIconView(
                     path: fileIconPath,
                     size: 13,

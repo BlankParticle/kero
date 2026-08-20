@@ -30,7 +30,7 @@ final class KeroTerminalView: AppTerminalView, TerminalBackendSurface {
     /// Latest scroll report, so a scrollbar drag can be mapped back onto a row.
     var lastScroll: TerminalScrollPosition?
     /// Ghostty reports the recognized link under the pointer as hover state.
-    /// The Command-right-click menu uses it to seed a new browser.
+    /// The Command-right-click menu uses it to seed file-open actions.
     var hoveredLink: String?
 
     private let progressBar = KeroTerminalProgressBarView(frame: .zero)
@@ -300,10 +300,8 @@ final class KeroTerminalView: AppTerminalView, TerminalBackendSurface {
         if let linkTarget {
             menu.addItem(.separator())
             switch linkTarget {
-            case .url(let url):
-                for item in splitTarget.browserMenuItems(initialURL: url.absoluteString) {
-                    menu.addItem(item)
-                }
+            case .url:
+                break
             case .file(let url):
                 for item in splitTarget.fileMenuItems(path: url.path) {
                     menu.addItem(item)
@@ -533,24 +531,8 @@ final class KeroTerminalProgressBarView: NSView {
 /// validation so these actions remain enabled even when there is no selection.
 final class SplitMenuTarget: NSObject {
     var onSplit: ((PaneDropEdge) -> Void)?
-    var onNewBrowserTab: ((String?) -> Void)?
-    var onNewBrowserPane: ((String?) -> Void)?
     var onNewFileTab: ((String) -> Void)?
     var onNewFilePane: ((String) -> Void)?
-
-    func browserMenuItems(initialURL: String) -> [NSMenuItem] {
-        let tabItem = item(
-            String(localized: "New Browser Tab"),
-            #selector(newBrowserTab(_:))
-        )
-        tabItem.representedObject = initialURL
-        let paneItem = item(
-            String(localized: "New Browser Pane"),
-            #selector(newBrowserPane(_:))
-        )
-        paneItem.representedObject = initialURL
-        return [tabItem, paneItem]
-    }
 
     func fileMenuItems(path: String) -> [NSMenuItem] {
         let tabItem = item(
@@ -585,14 +567,6 @@ final class SplitMenuTarget: NSObject {
     @objc private func splitLeft() { onSplit?(.left) }
     @objc private func splitUp() { onSplit?(.top) }
     @objc private func splitDown() { onSplit?(.bottom) }
-    @objc private func newBrowserTab(_ sender: NSMenuItem) {
-        onNewBrowserTab?(sender.representedObject as? String)
-    }
-
-    @objc private func newBrowserPane(_ sender: NSMenuItem) {
-        onNewBrowserPane?(sender.representedObject as? String)
-    }
-
     @objc private func newFileTab(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
         onNewFileTab?(path)

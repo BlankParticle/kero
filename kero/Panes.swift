@@ -7,20 +7,18 @@ import AppKit
 import Combine
 import Foundation
 
-/// The leaf content of a pane: a terminal session, an open file, a browser, or
-/// a git diff. A project tab used to *be* one of these; now a tab is a recursive
+/// The leaf content of a pane: a terminal session, an open file, or a git
+/// diff. A project tab used to *be* one of these; now a tab is a recursive
 /// split layout, and this is what sits at each leaf.
 enum PaneContent: nonisolated Identifiable {
     case session(TerminalSession)
     case file(FileTab)
-    case browser(BrowserTab)
     case diff(DiffTab)
 
     nonisolated var id: UUID {
         switch self {
         case .session(let session): return session.id
         case .file(let file): return file.id
-        case .browser(let browser): return browser.id
         case .diff(let diff): return diff.id
         }
     }
@@ -42,7 +40,6 @@ extension PaneContent {
         switch self {
         case .session(let session): return session.title
         case .file(let file): return file.name
-        case .browser(let browser): return browser.title
         case .diff(let diff): return diff.title
         }
     }
@@ -51,7 +48,6 @@ extension PaneContent {
         switch self {
         case .session: return "terminal"
         case .file: return "doc.text"
-        case .browser: return "globe"
         case .diff: return "plus.forwardslash.minus"
         }
     }
@@ -62,7 +58,7 @@ extension PaneContent {
         switch self {
         case .file(let file): return file.path
         case .diff(let diff): return diff.path
-        case .session, .browser: return nil
+        case .session: return nil
         }
     }
 
@@ -70,7 +66,7 @@ extension PaneContent {
         switch self {
         case .file(let file): return file.isDirty
         case .diff(let diff): return diff.isDirty
-        case .session, .browser: return false
+        case .session: return false
         }
     }
 
@@ -78,7 +74,7 @@ extension PaneContent {
         switch self {
         case .file(let file): return file.saveError
         case .diff(let diff): return diff.saveError
-        case .session, .browser: return nil
+        case .session: return nil
         }
     }
 
@@ -86,7 +82,7 @@ extension PaneContent {
         switch self {
         case .file(let file): file.save()
         case .diff(let diff): diff.save()
-        case .session, .browser: break
+        case .session: break
         }
     }
 }
@@ -432,13 +428,6 @@ final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
 
     var diffs: [DiffTab] {
         allContents.compactMap { if case .diff(let diff) = $0 { return diff }; return nil }
-    }
-
-    var browsers: [BrowserTab] {
-        allContents.compactMap {
-            if case .browser(let browser) = $0 { return browser }
-            return nil
-        }
     }
 
     var hasMultiplePanes: Bool { allPanes.count > 1 }

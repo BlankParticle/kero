@@ -1788,10 +1788,8 @@ final class AlacrittyTerminalView: NSView, TerminalBackendSurface, NSUserInterfa
         if let linkTarget {
             menu.addItem(.separator())
             switch linkTarget {
-            case .url(let url):
-                for item in splitTarget.browserMenuItems(initialURL: url.absoluteString) {
-                    menu.addItem(item)
-                }
+            case .url:
+                break
             case .file(let url):
                 for item in splitTarget.fileMenuItems(path: url.path) {
                     menu.addItem(item)

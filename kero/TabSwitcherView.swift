@@ -566,9 +566,7 @@ private struct TabSwitcherCard: View {
 
     @ViewBuilder
     private var titleIcon: some View {
-        if case .browser(let browser) = tab.focusedContent {
-            BrowserFaviconView(browser: browser, size: 16)
-        } else if let path = tab.focusedContent?.fileIconPath {
+        if let path = tab.focusedContent?.fileIconPath {
             MaterialFileIconView(path: path, size: 16)
         } else {
             Image(systemName: tab.focusedContent?.systemImage ?? "rectangle")
@@ -695,8 +693,6 @@ private struct TabPaneThumbnail: View {
                 terminal(session)
             case .file(let file):
                 filePreview(file)
-            case .browser(let browser):
-                browserPreview(browser)
             case .diff(let diff):
                 diffPreview(diff)
             }
@@ -778,10 +774,6 @@ private struct TabPaneThumbnail: View {
         .padding(4)
     }
 
-    private func browserPreview(_ browser: BrowserTab) -> some View {
-        BrowserTabSwitcherPreview(browser: browser)
-    }
-
     private var terminalForeground: NSColor {
         Theme.terminal(dark: colorScheme == .dark).foregroundNSColor
     }
@@ -809,35 +801,5 @@ private struct TabPaneThumbnail: View {
             .prefix(26)
             .map { String($0.prefix(120)) }
         return lines.joined(separator: "\n")
-    }
-}
-
-private struct BrowserTabSwitcherPreview: View {
-    @ObservedObject var browser: BrowserTab
-
-    var body: some View {
-        VStack(spacing: 5) {
-            BrowserFaviconView(
-                browser: browser,
-                size: 18,
-                fallbackSystemImage: browser.isLoading
-                    ? "globe.americas.fill"
-                    : "globe"
-            )
-            .font(.system(size: 17, weight: .light))
-            .foregroundStyle(Color(nsColor: Theme.accent))
-            Text(browser.title)
-                .font(.system(size: 8, weight: .medium))
-                .lineLimit(1)
-            if !browser.urlString.isEmpty {
-                Text(browser.urlString)
-                    .font(.system(size: 5.5))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .padding(6)
     }
 }

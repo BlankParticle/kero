@@ -731,22 +731,6 @@
         }
       }
     },
-    "Back" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "戻る"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "返回"
-          }
-        }
-      }
-    },
     "Bar" : {
       "comment" : "Thin vertical terminal cursor shape.",
       "localizations" : {
@@ -891,22 +875,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "执行 Git 操作前，分支、HEAD 或上游已发生变化。请检查当前更改后重试。"
-          }
-        }
-      }
-    },
-    "Browser" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ブラウザ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "浏览器"
           }
         }
       }
@@ -1602,22 +1570,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "复制绝对路径"
-          }
-        }
-      }
-    },
-    "Copy Address" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アドレスをコピー"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "复制地址"
           }
         }
       }
@@ -2908,22 +2860,6 @@
         }
       }
     },
-    "Focus Address Bar" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アドレスバーにフォーカス"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "聚焦地址栏"
-          }
-        }
-      }
-    },
     "Focus Next Pane" : {
       "localizations" : {
         "ja" : {
@@ -3112,22 +3048,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "强制结束"
-          }
-        }
-      }
-    },
-    "Forward" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "進む"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "前进"
           }
         }
       }
@@ -3937,38 +3857,6 @@
         }
       }
     },
-    "New Browser Pane" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新規ブラウザペイン"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新建浏览器窗格"
-          }
-        }
-      }
-    },
-    "New Browser Tab" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新規ブラウザタブ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新建浏览器标签页"
-          }
-        }
-      }
-    },
     "New File Pane" : {
       "localizations" : {
         "ja" : {
@@ -4125,22 +4013,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新建会话（⌘T）"
-          }
-        }
-      }
-    },
-    "New Tab" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新規タブ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新建标签页"
           }
         }
       }
@@ -4566,31 +4438,6 @@
           }
         }
       }
-    },
-    "Open in Default Browser" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "デフォルトのブラウザで開く"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在默认浏览器中打开"
-          }
-        }
-      }
-    },
-    "Open Link in New Pane" : {
-
-    },
-    "Open Link in New Tab" : {
-
-    },
-    "Open Link in New Window" : {
-
     },
     "Open to the Side" : {
       "localizations" : {
@@ -5132,38 +4979,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新启动 Kero 以应用语言更改。"
-          }
-        }
-      }
-    },
-    "Reload Page" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ページを再読み込み"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新载入页面"
-          }
-        }
-      }
-    },
-    "Reload Page (⌘R)" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ページを再読み込み（⌘R）"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新载入页面（⌘R）"
           }
         }
       }
@@ -5768,22 +5583,6 @@
         }
       }
     },
-    "Search or enter website name" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "検索またはWebサイト名を入力"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "搜索或输入网站名称"
-          }
-        }
-      }
-    },
     "Select All" : {
       "localizations" : {
         "ja" : {
@@ -5974,22 +5773,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设置…"
-          }
-        }
-      }
-    },
-    "Share" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "共有"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "共享"
           }
         }
       }
@@ -6385,38 +6168,6 @@
         }
       }
     },
-    "Stop" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "停止"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "停止"
-          }
-        }
-      }
-    },
-    "Stop Loading" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "読み込みを停止"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "停止载入"
-          }
-        }
-      }
-    },
     "Switch Branch" : {
       "localizations" : {
         "ja" : {
@@ -6724,22 +6475,6 @@
         }
       }
     },
-    "The webpage stopped responding." : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Webページが応答を停止しました。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "网页已停止响应。"
-          }
-        }
-      }
-    },
     "Theme" : {
       "localizations" : {
         "ja" : {
@@ -6838,22 +6573,6 @@
     },
     "This terminal predates Kero automation. Open a new terminal and try again." : {
 
-    },
-    "This webpage couldn’t be loaded." : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このWebページを読み込めませんでした。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法载入此网页。"
-          }
-        }
-      }
     },
     "Toggle Files Panel" : {
       "localizations" : {
@@ -6995,22 +6714,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "工具栏"
-          }
-        }
-      }
-    },
-    "Try Again" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再試行"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重试"
           }
         }
       }
@@ -7483,22 +7186,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "警告：粘贴内容可能不安全"
-          }
-        }
-      }
-    },
-    "Webpage" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Webページ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "网页"
           }
         }
       }
