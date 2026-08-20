@@ -11,8 +11,8 @@ terminals, tabs, and panel state.
 <kbd>Cmd</kbd>+<kbd>N</kbd> creates one with a single terminal in it. The
 terminal starts in the current session's directory, or your home directory if
 there isn't one, so the usual next step is to `cd` where you're going. Kero
-takes it from there: the file tree and git panel anchor themselves to the
-repository containing that directory.
+takes it from there: the project directory anchors itself to the repository
+containing that directory.
 
 To skip the `cd`, right-click a folder in Finder and choose **Services → New
 Kero Project Here** — it opens as a project with its terminal already started
@@ -35,17 +35,17 @@ disk.
 
 ### The project directory
 
-Two panels need to know which folder they're showing: the file tree and the git
-panel. By default Kero works it out — it takes the terminal's current directory
-and walks up to the **nearest enclosing git repository**.
+Every project has a directory it treats as home. By default Kero works it out —
+it takes the terminal's current directory and walks up to the **nearest
+enclosing git repository**.
 
-That's why `cd`-ing around inside a repo doesn't make the file tree jump: the
-repository root stays the root. Outside a repository, the panels simply follow
-the terminal.
+That's why `cd`-ing around inside a repo doesn't move the project directory:
+the repository root stays the root. Outside a repository, it simply follows the
+terminal.
 
 When the foreground program moves into a different checkout—an agent entering
-its own Git worktree, for example—Files, Git, and Info follow that checkout
-instead. They return when the foreground job does. A manually pinned project
+its own Git worktree, for example—the project directory follows that checkout
+instead. It returns when the foreground job does. A manually pinned project
 directory always wins and disables this automatic re-rooting.
 
 To pin it instead, right-click the project and choose **Set Project Directory…**.
@@ -55,7 +55,7 @@ Directory** hands control back.
 <Callout type="info">
 The Info panel (<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd>) shows both: the
 shell's live **Current Directory** when it differs, and the **Project
-Directory** the panels are anchored to, marked `(AUTO)` when it's derived.
+Directory** the project is anchored to, marked `(AUTO)` when it's derived.
 </Callout>
 
 ## Sessions
@@ -84,8 +84,8 @@ and **Use Automatic Title** to go back to following the terminal.
 
 The rest of the tab menu is the usual set: **Close**, **Close Others**, **Close
 Tabs to the Right**, **Close All**, plus **Reveal in Finder** and **Copy
-Absolute Path** for the session's directory. **Close Files** and **Close Diffs**
-clear those content types across the project while leaving terminals alone.
+Absolute Path** for the session's directory. **Close Files** closes the
+project's open file tabs while leaving terminals alone.
 
 ## Windows
 

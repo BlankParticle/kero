@@ -693,8 +693,6 @@ private struct TabPaneThumbnail: View {
                 terminal(session)
             case .file(let file):
                 filePreview(file)
-            case .diff(let diff):
-                diffPreview(diff)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -758,28 +756,12 @@ private struct TabPaneThumbnail: View {
         }
     }
 
-    private func diffPreview(_ diff: DiffTab) -> some View {
-        HStack(spacing: 1) {
-            Text(textExcerpt(diff.web.oldContent))
-                .foregroundStyle(Color.red.opacity(0.76))
-                .background(Color.red.opacity(0.07))
-            Text(textExcerpt(diff.web.newContent))
-                .foregroundStyle(Color.green.opacity(0.76))
-                .background(Color.green.opacity(0.07))
-        }
-        .font(.system(size: 4.5, design: .monospaced))
-        .lineSpacing(0)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(4)
-    }
-
     private var terminalForeground: NSColor {
         Theme.terminal(dark: colorScheme == .dark).foregroundNSColor
     }
 
     /// Bound the sampled UTF-16 range before splitting it into lines so a
-    /// multi-megabyte editor or diff cannot make a tiny thumbnail expensive.
+    /// multi-megabyte editor cannot make a tiny thumbnail expensive.
     private func textExcerpt(
         _ text: String, aroundUTF16 location: Int? = nil
     ) -> String {

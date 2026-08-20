@@ -8,7 +8,7 @@ import Combine
 import Foundation
 
 /// A project groups tabs and appears as one row in the left sidebar. Each tab
-/// is a recursive split layout of terminal, file, and diff panes; see
+/// is a recursive split layout of terminal and file panes; see
 /// `PaneTab`. It always starts with one session; closing the last tab leaves
 /// the project open but empty — only the explicit "Close Project" action (see
 /// `TerminalManager.close(_:)`) removes it from the manager.
@@ -120,21 +120,11 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         tabs.contains { $0.allContents.contains { $0.isFile } }
     }
 
-    var hasDiffs: Bool {
-        tabs.contains { $0.allContents.contains { $0.isDiff } }
-    }
-
-    /// Every diff shown anywhere, paired with the id of its containing tab so
-    /// the content view can tell which one is currently on screen.
-    var diffPlacements: [(diff: DiffTab, tabID: UUID)] {
-        tabs.flatMap { tab in tab.diffs.map { (diff: $0, tabID: tab.id) } }
-    }
-
-    /// The focused terminal session; while a file or diff pane is
-    /// focused it has no directory of its own, so panels that need a working
-    /// directory (file tree, git, info) track a terminal that does: one sharing
-    /// the tab (a split), else the session the content was opened from (the
-    /// tab's `contextSession`), else the project's first session.
+    /// The focused terminal session; while a file pane is focused it has no
+    /// directory of its own, so panels that need a working directory (info)
+    /// track a terminal that does: one sharing the tab (a split), else the
+    /// session the content was opened from (the tab's `contextSession`), else
+    /// the project's first session.
     var selectedSession: TerminalSession? {
         if case .session(let session)? = focusedContent {
             return session
@@ -144,7 +134,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             ?? sessions.first
     }
 
-    /// Whether the selected tab's focused pane can be split (false for diffs).
+    /// Whether the selected tab's focused pane can be split.
     var canSplit: Bool {
         selectedTab?.canSplit ?? false
     }
@@ -165,13 +155,13 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         case foreground(isWorktree: Bool)
     }
 
-    /// Root for the file tree and git panels: the pinned directory when the
-    /// user set one (and it still exists on disk), else the repository the
-    /// terminal's foreground job moved to (an agent's worktree), else the
-    /// closest git repository containing `cwd`, else `cwd` itself — the
+    /// Root for the info panel: the pinned directory when the user set one
+    /// (and it still exists on disk), else the repository the terminal's
+    /// foreground job moved to (an agent's worktree), else the closest git
+    /// repository containing `cwd`, else `cwd` itself — the
     /// follow-the-terminal behavior used before projects had a directory.
-    /// Everything but the pin is re-derived on every call, so the panels
-    /// track the session in and out of repositories without sticking.
+    /// Everything but the pin is re-derived on every call, so the panel
+    /// tracks the session in and out of repositories without sticking.
     func panelRoot(
         followingSessionAt cwd: String, foregroundAt foregroundCwd: String? = nil
     ) -> (root: String, source: PanelRootSource) {
@@ -285,7 +275,6 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     func splitUp() { split(toward: .top) }
 
     /// Splits the focused pane's rectangle on `edge` with a fresh terminal.
-    /// No-op while a diff is focused.
     func split(toward edge: PaneDropEdge) {
         guard let tab = selectedTab, tab.canSplit else { return }
         let session = makeSession()
@@ -302,8 +291,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         focus: Bool
     ) -> (tab: PaneTab, pane: Pane, session: TerminalSession)? {
         guard let tab = tabs.first(where: { $0.layout.contains(targetPaneID) }),
-              let target = tab.allPanes.first(where: { $0.id == targetPaneID }),
-              !target.content.isDiff
+              let target = tab.allPanes.first(where: { $0.id == targetPaneID })
         else { return nil }
 
         let contextDirectory: String? = switch target.content {
@@ -368,8 +356,8 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     }
 
     /// Opens `path` as a new pane beside the focused one in the current tab
-    /// ("Open to the Side"). Falls back to a fresh tab when the current tab
-    /// can't take a split (e.g. it's a diff) or none is selected.
+    /// ("Open to the Side"). Falls back to a fresh tab when no tab is
+    /// selected.
     func openFileToSide(_ path: String) {
         guard let tab = selectedTab, tab.canSplit else {
             openFile(path)
@@ -397,106 +385,6 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         return nil
     }
 
-    // MARK: - File paths
-
-    /// After a rename on disk, re-points any open file pane at its new path —
-    /// the renamed file itself, or any file beneath a renamed directory.
-    func updateFilePaths(from oldPath: String, to newPath: String) {
-        for tab in tabs {
-            for case .file(let file) in tab.allContents {
-                if file.path == oldPath {
-                    file.updatePath(newPath)
-                } else if file.path.hasPrefix(oldPath + "/") {
-                    file.updatePath(newPath + String(file.path.dropFirst(oldPath.count)))
-                }
-            }
-        }
-    }
-
-    // MARK: - Diffs
-
-    /// Opens a git diff as a new tab, reusing (and reloading) an existing tab
-    /// for the same file and stage side.
-    func openDiff(
-        repoRoot: String, path: String, staged: Bool, untracked: Bool, origPath: String?
-    ) {
-        if let (tab, pane) = findDiffPane(
-            repoRoot: repoRoot, path: path, staged: staged, commitHash: nil
-        ),
-           case .diff(let diff) = pane.content {
-            diff.untracked = untracked
-            diff.origPath = origPath
-            diff.reload()
-            selectedTabID = tab.id
-            tab.focusedPaneID = pane.id
-            return
-        }
-        let context = selectedSession
-        let diff = DiffTab(
-            repoRoot: repoRoot, path: path, staged: staged,
-            untracked: untracked, origPath: origPath
-        )
-        let tab = makeTab(content: .diff(diff))
-        tab.contextSession = context
-        insertNextToSelected(tab)
-        selectedTabID = tab.id
-    }
-
-    /// Opens one file as it changed in a historical commit, comparing the
-    /// commit's first parent with the selected commit.
-    func openCommitDiff(
-        repoRoot: String,
-        path: String,
-        commitHash: String,
-        parentHash: String?,
-        status: Character,
-        origPath: String?
-    ) {
-        if let (tab, pane) = findDiffPane(
-            repoRoot: repoRoot, path: path, staged: false, commitHash: commitHash
-        ), case .diff(let diff) = pane.content {
-            diff.origPath = origPath
-            diff.reload()
-            selectedTabID = tab.id
-            tab.focusedPaneID = pane.id
-            return
-        }
-        let context = selectedSession
-        let diff = DiffTab(
-            repoRoot: repoRoot,
-            path: path,
-            staged: false,
-            untracked: false,
-            origPath: origPath,
-            commitHash: commitHash,
-            commitParentHash: parentHash,
-            commitStatus: status
-        )
-        let tab = makeTab(content: .diff(diff))
-        tab.contextSession = context
-        insertNextToSelected(tab)
-        selectedTabID = tab.id
-    }
-
-    private func findDiffPane(
-        repoRoot: String, path: String, staged: Bool, commitHash: String?
-    ) -> (tab: PaneTab, pane: Pane)? {
-        for tab in tabs {
-            if let pane = tab.allPanes.first(where: {
-                if case .diff(let diff) = $0.content {
-                    return diff.repoRoot == repoRoot
-                        && diff.path == path
-                        && diff.staged == staged
-                        && diff.commitHash == commitHash
-                }
-                return false
-            }) {
-                return (tab, pane)
-            }
-        }
-        return nil
-    }
-
     // MARK: - Closing
 
     /// Closes one piece of content: terminates a session, prompts before
@@ -510,15 +398,6 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             removePaneWithContent(content.id)
         case .file(let file):
             guard file.isDirty else {
-                removePaneWithContent(content.id)
-                return
-            }
-            let window = NSApp.keyWindow ?? NSApp.mainWindow
-            Task { @MainActor in
-                _ = await confirmCloseUnsaved(content, in: window)
-            }
-        case .diff(let diff):
-            guard diff.isDirty else {
                 removePaneWithContent(content.id)
                 return
             }
@@ -561,11 +440,6 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         closeBatch(tabs.flatMap(\.allContents).filter { $0.isFile })
     }
 
-    /// Closes every diff pane while leaving other content in split tabs open.
-    func closeDiffs() {
-        closeBatch(tabs.flatMap(\.allContents).filter { $0.isDiff })
-    }
-
     /// Closes every tab, leaving the project open but empty.
     func closeAll() {
         closeBatch(tabs.flatMap(\.allContents))
@@ -585,7 +459,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
         alert.alertStyle = .warning
         alert.messageText = String(
             localized: "Do you want to save the changes you made to \(content.title)?",
-            comment: "Unsaved file or diff confirmation. The placeholder is a file name."
+            comment: "Unsaved file confirmation. The placeholder is a file name."
         )
         alert.informativeText = String(localized: "Your changes will be lost if you don't save them.")
         alert.addButton(withTitle: String(localized: "Save"))
@@ -659,8 +533,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
 
     /// Moves a tab into another tab's pane tree at the indicated drop edge.
     /// The source layout is grafted intact, so dragging a tab that already has
-    /// splits preserves those panes and their proportions. Diff tabs stay
-    /// standalone, matching the same constraint as every other split path.
+    /// splits preserves those panes and their proportions.
     @discardableResult
     func moveTab(
         _ draggedID: UUID,
@@ -672,9 +545,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
               let draggedIndex = tabs.firstIndex(where: { $0.id == draggedID }),
               let draggedTab = tabs.first(where: { $0.id == draggedID }),
               let targetTab = tabs.first(where: { $0.id == targetTabID }),
-              !draggedTab.allContents.contains(where: \.isDiff),
-              let targetPane = targetTab.allPanes.first(where: { $0.id == targetPaneID }),
-              !targetPane.content.isDiff
+              targetTab.allPanes.contains(where: { $0.id == targetPaneID })
         else { return false }
 
         targetTab.insert(
@@ -734,7 +605,7 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
     }
 
     /// Rebuilds a saved tab's pane layout — recreating its sessions (wired for
-    /// exit + observation), files and diffs — then registers and appends it.
+    /// exit + observation) and files — then registers and appends it.
     /// Skips panes whose content can't be rebuilt; a tab with none is dropped.
     @discardableResult
     func restoreTab(
@@ -782,24 +653,6 @@ final class Project: nonisolated ObservableObject, nonisolated Identifiable {
             let file = FileTab(path: path)
             if let editorState { file.editorState = editorState }
             return .file(file)
-        case .diff(let repoRoot, let path, let staged, let untracked, let origPath):
-            return .diff(DiffTab(
-                repoRoot: repoRoot, path: path, staged: staged,
-                untracked: untracked, origPath: origPath
-            ))
-        case .commitDiff(
-            let repoRoot, let path, let commitHash, let parentHash, let status, let origPath
-        ):
-            return .diff(DiffTab(
-                repoRoot: repoRoot,
-                path: path,
-                staged: false,
-                untracked: false,
-                origPath: origPath,
-                commitHash: commitHash,
-                commitParentHash: parentHash,
-                commitStatus: status.first
-            ))
         }
     }
 

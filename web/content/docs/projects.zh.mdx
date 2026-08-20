@@ -7,8 +7,7 @@ description: Kero 如何组织你的工作——侧边栏里的项目、作为�
 
 一个项目就是一件正在做的事——实际用起来通常就是一个仓库——有自己的终端、标签页和面板状态。
 
-<kbd>Cmd</kbd>+<kbd>N</kbd> 新建一个，里面带一个终端。这个终端从当前会话的目录启动；如果没有当前会话，就从你的用户主目录启动，所以接下来通常是 `cd` 到目标位置。剩下的 Kero 会接手：文件树和 git
-面板会锚定到包含那个目录的仓库上。
+<kbd>Cmd</kbd>+<kbd>N</kbd> 新建一个，里面带一个终端。这个终端从当前会话的目录启动；如果没有当前会话，就从你的用户主目录启动，所以接下来通常是 `cd` 到目标位置。剩下的 Kero 会接手：项目目录会锚定到包含那个目录的仓库上。
 
 想省掉这次 `cd`，在 Finder 里右键一个文件夹，选 **服务 → New Kero Project Here**——它会作为一个项目打开，终端已经在里面启动好了。
 
@@ -26,19 +25,19 @@ description: Kero 如何组织你的工作——侧边栏里的项目、作为�
 
 ### 项目目录
 
-有两个面板需要知道自己在显示哪个文件夹：文件树和 git 面板。默认情况下 Kero 自己判断——
+每个项目都有一个它当作「家」的目录。默认情况下 Kero 自己判断——
 它从终端的当前目录出发，往上找到**最近的那个包含它的 git 仓库**。
 
-所以在仓库里 `cd` 来 `cd` 去，文件树不会跟着跳：仓库根目录始终是根目录。不在仓库里时，这两个面板就单纯跟着终端走。
+所以在仓库里 `cd` 来 `cd` 去，项目目录不会跟着跳：仓库根目录始终是根目录。不在仓库里时，它就单纯跟着终端走。
 
-如果前台程序进入了另一个 checkout——比如 agent 切进自己的 Git worktree——文件、Git 和信息面板会跟着那个 checkout，前台任务回来时再恢复。手动固定的项目目录始终优先，也会关闭这种自动换根。
+如果前台程序进入了另一个 checkout——比如 agent 切进自己的 Git worktree——项目目录会跟着那个 checkout，前台任务回来时再恢复。手动固定的项目目录始终优先，也会关闭这种自动换根。
 
 想固定住，右键项目选 **Set Project Directory…**。固定的目录会跨重启记住，**Use Automatic
 Directory** 则交还自动判断。
 
 <Callout type="info">
 信息面板（<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd>）两个都显示：shell 实时的
-**Current Directory**（与下面不同时才出现），以及面板锚定的 **Project Directory**，自动推导时标着 `(AUTO)`。
+**Current Directory**（与下面不同时才出现），以及项目锚定的 **Project Directory**，自动推导时标着 `(AUTO)`。
 </Callout>
 
 ## 会话
@@ -62,7 +61,7 @@ Directory** 则交还自动判断。
 
 标签页菜单里其余的是常规那一套：**Close**、**Close Others**、**Close Tabs to the Right**、
 **Close All**，外加针对会话目录的 **Reveal in Finder** 和 **Copy Absolute Path**。**Close Files**
-与 **Close Diffs** 会清掉项目里的对应内容，但保留终端和浏览器窗格。
+会关掉项目里打开的文件标签页，但保留终端。
 
 ## 窗口
 

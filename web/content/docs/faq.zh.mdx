@@ -42,7 +42,7 @@ dotfiles。终端窗格可以选择 Ghostty 或 Alacritty 作为后端。
 
 <Accordion title="这是一个 IDE 吗？">
 
-不是，也不打算往那个方向走。终端始终是核心。git 和文件面板的存在，是为了让你不切换应用就能审阅并提交终端里完成的工作——而不是变成你主要的工作场所。
+不是，也不打算往那个方向走。终端始终是核心。文件编辑器的存在，是为了让你不切换应用就能顺手改个笔误——而不是变成你主要的工作场所。
 
 </Accordion>
 
@@ -54,9 +54,9 @@ dotfiles。终端窗格可以选择 Ghostty 或 Alacritty 作为后端。
 
 <Accordion title="能和 AI 编码工具一起用吗？">
 
-很大程度上就是为此而做的。打开 AI 后，直接用自然语言让受支持的 agent 在后台窗格运行任务，或把范围明确的工作交给另一个 agent。不同 Kero 窗格里的 agent 还可以互相询问、传递发现和补充要求，不再需要你来回复制上下文。Kero 会显示 provider 报告的 working、blocked 和完成状态，不会根据终端文字猜测；批准与最终 diff 仍由你决定。见[与 AI Agent 协作](/zh/docs/automation)。
+很大程度上就是为此而做的。打开 AI 后，直接用自然语言让受支持的 agent 在后台窗格运行任务，或把范围明确的工作交给另一个 agent。不同 Kero 窗格里的 agent 还可以互相询问、传递发现和补充要求，不再需要你来回复制上下文；它们还能通过 `kero +agent` 等待彼此由 provider 报告的生命周期状态——绝不根据终端文字猜测。批准与最终结果仍由你决定。见[与 AI Agent 协作](/zh/docs/automation)。
 
-当然也可以把 agent 当作普通终端程序使用：在 [Git 面板](/zh/docs/git)里审阅它的 diff，在旁边读文件，然后只暂存真正想要的部分。
+当然也可以把 agent 当作普通终端程序使用，再用你自己习惯的工具审阅它的改动。
 
 </Accordion>
 

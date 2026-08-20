@@ -515,10 +515,6 @@ private struct PaneView: View {
                 onSplit: splitFromMenu
             )
                 .background(Color(nsColor: Theme.background))
-        case .diff:
-            // Rendered by the always-mounted diff stack behind the layout; stay
-            // transparent and non-interactive so clicks and scrolls reach it.
-            Color.clear.allowsHitTesting(false)
         }
     }
 
@@ -688,13 +684,6 @@ private struct PaneHeaderTitle: View {
             SessionPaneHeaderTitle(session: session, isFocused: isFocused)
         case .file(let file):
             FilePaneHeaderTitle(file: file, isFocused: isFocused)
-        case .diff(let diff):
-            PaneHeaderLabel(
-                systemImage: "plus.forwardslash.minus",
-                fileIconPath: diff.path,
-                title: diff.title,
-                isFocused: isFocused
-            )
         }
     }
 }

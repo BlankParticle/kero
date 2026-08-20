@@ -46,25 +46,12 @@ to one appearance.
 string — defaults `"Default Dark"` and `"Default Light"`
 
 The color theme for each appearance. A theme recolors terminal panes, window
-chrome, sidebars, the editor, and diffs together. The built-in defaults keep
+chrome, sidebars, and the editor together. The built-in defaults keep
 Kero's translucent sidebar; other themes paint it to match their palette.
 
 Settings lists the curated theme catalog shared by both terminal backends. A
 hand-written name must match one of those display names exactly, including
 case, or Kero falls back to the corresponding default.
-
-### `toolbar.visibility`
-
-`"hide"` · `"auto"` · `"always"` — default `"hide"`
-
-Controls the compact toolbar below the active tab:
-
-- `"hide"` keeps it out of the window.
-- `"auto"` shows it only when the project directory is a Git repository.
-- `"always"` keeps its Git entry point visible in every project, including a
-  **No Git Repository** state.
-
-See [The Git toolbar](/docs/git#the-git-toolbar) for what it shows.
 
 ## Text
 
@@ -72,7 +59,7 @@ See [The Git toolbar](/docs/git#the-git-toolbar) for what it shows.
 
 string — default `""`, meaning the bundled JetBrains Mono
 
-The terminal, editor, and diff viewer share this family. Give a family name,
+The terminal and editor share this family. Give a family name,
 not a face: `"IBM Plex Mono"`, not `"IBM Plex Mono Regular"`. Unknown or
 non-monospace families fall back to the bundled default.
 
@@ -83,8 +70,8 @@ and icon glyphs work even when the chosen family is not a patched Nerd Font.
 
 number, 8–32 — default `13`
 
-The shared terminal, editor, and diff font size in points. This is the one key
-Kero writes even when it has the default value.
+The shared terminal and editor font size in points. This is the one key Kero
+writes even when it has the default value.
 
 ### `sidebar.font-size`
 
@@ -106,9 +93,8 @@ the current dotted key.
 
 boolean — default `false`
 
-Soft-wraps long lines to the pane width in the [file editor](/docs/files).
-When false, long lines scroll horizontally. It does not change wrapping in a
-terminal or diff.
+Soft-wraps long lines to the pane width in the file editor. When false, long
+lines scroll horizontally. It does not change wrapping in a terminal.
 
 ## Terminal
 
@@ -176,7 +162,6 @@ theme-light = "Catppuccin Latte"
 font-family = "IBM Plex Mono"
 font-size = 14
 sidebar.font-size = 13
-toolbar.visibility = "auto"
 terminal.font-thicken = true
 terminal.macos-option-as-alt = false
 terminal.backend = "alacritty"
@@ -195,9 +180,9 @@ Every key is optional. Delete a key to return that setting to its default.
   relaunch, so it lives in Kero's preferences rather than TOML.
 - **Automatic update checks.** The toggle in **Settings → Updates** belongs to
   Sparkle. See [Installation](/docs/installation#updates).
-- **Window and layout state.** Window size, sidebar widths, selected panels,
-  projects, tabs, panes, and diff control preferences live in
-  Kero's macOS preferences and session snapshot.
+- **Window and layout state.** Window size, sidebar widths, panel visibility,
+  projects, tabs, and panes live in Kero's macOS preferences and session
+  snapshot.
 - **Backend config files.** Kero does not read `~/.config/ghostty` or an
   Alacritty config. Kero's settings are the supported surface for both.
 - **Keybindings.** The [shortcuts](/docs/shortcuts) are fixed for now.

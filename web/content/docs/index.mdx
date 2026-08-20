@@ -1,30 +1,29 @@
 ---
 title: What Kero is
-description: A native macOS terminal workspace — projects, sessions, files, git, and coding agents in one window.
+description: A native macOS terminal workspace — projects, sessions, splits, and coding agents in one window.
 ---
 
 Kero is a terminal. The rest of the window exists so you don't have to leave it.
 
 Each repository you work on becomes a **project** in the sidebar. A project holds
 as many terminal **sessions** as you need, each one a tab with its own directory
-and scrollback, and each tab can be **split** into panes. Beside all of that sit
-the side panels, each one a keystroke away: a git panel for reviewing and
-committing, a file tree with an editor, and a live view of the processes and
-ports your session is running. Coding-agent status lives in the same project
-layout instead of becoming a separate window to manage.
+and scrollback, and each tab can be **split** into panes. A built-in editor
+opens files as tabs or panes for quick edits, and an info panel — one keystroke
+away — gives you a live view of the processes and ports your session is
+running. Coding-agent status lives in the same project layout instead of
+becoming a separate window to manage.
 
 Terminal panes use your choice of [Ghostty or Alacritty](/docs/terminal#terminal-backends),
 both hosted and GPU-rendered natively by Kero. Your shell, prompt, aliases, and
 dotfiles are untouched.
 
-![Kero showing a project's terminal session with the git panel open](/kero-screenshot.png)
+![Kero showing a project's terminal session](/kero-screenshot.png)
 
 ## What it is not
 
-Kero is not an IDE, and it's not trying to become one. The git and files panels
-exist so you can read a diff or fix a typo without switching apps — not so you
-can live in them. Nothing runs behind your back: every git action maps to a
-command you could have typed, and the output is shown to you.
+Kero is not an IDE, and it's not trying to become one. The editor exists so you
+can fix a typo without switching apps — not so you can live in it. Everything
+else happens in the terminal, in plain sight: nothing runs behind your back.
 
 ## Where to go next
 

@@ -76,15 +76,6 @@ final class FileTab: nonisolated ObservableObject, nonisolated Identifiable {
         (path as NSString).lastPathComponent
     }
 
-    /// Re-points this tab at a new location after the file (or a directory
-    /// above it) was renamed on disk. The bytes are unchanged, so nothing
-    /// reloads; subsequent saves write to the new path.
-    func updatePath(_ newPath: String) {
-        guard newPath != path else { return }
-        invalidateReload()
-        path = newPath
-    }
-
     /// Recompute `isDirty` from the current `text` against the saved
     /// baseline. Called after every editor change (including undo/redo), so
     /// reverting to the saved content clears the dirty state.

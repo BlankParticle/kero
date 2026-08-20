@@ -10,7 +10,6 @@ import SwiftUI
 /// its sessions show as horizontal tabs in the main header.
 struct SidebarView: View {
     @ObservedObject var manager: TerminalManager
-    let bottomBarHeight: CGFloat
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var themeChanges = Theme.changes
     @Environment(\.openSettings) private var openSettings
@@ -90,7 +89,7 @@ struct SidebarView: View {
                 ) { openSettings() }
             }
             .padding(.horizontal, 8)
-            .frame(height: bottomBarHeight)
+            .frame(height: 32)
             .overlay(alignment: .top) {
                 Rectangle()
                     .fill(Color(nsColor: Theme.divider))

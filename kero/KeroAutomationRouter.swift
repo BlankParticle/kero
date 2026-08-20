@@ -112,9 +112,6 @@ enum KeroAutomationRouter {
         guard let target = targetPane(request, caller: caller) else {
             return failure(request, "pane_not_found", "No matching pane exists in this project.")
         }
-        guard !target.pane.content.isDiff else {
-            return failure(request, "pane_not_splittable", "Diff panes cannot be split.")
-        }
         guard let edgeName = request.params["edge"]?.stringValue,
               let edge = paneEdge(edgeName)
         else {
@@ -447,7 +444,6 @@ enum KeroAutomationRouter {
         let contentKind: String = switch context.pane.content {
         case .session: "terminal"
         case .file: "file"
-        case .diff: "diff"
         }
         var object: [String: KeroJSONValue] = [
             "project_id": .string(context.project.id.uuidString),

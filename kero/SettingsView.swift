@@ -17,17 +17,6 @@ struct SettingsView: View {
     /// Installed fixed-pitch families (bundled default first).
     private let families = TerminalFont.selectableFamilies()
 
-    private var toolbarVisibilityDescription: LocalizedStringKey {
-        switch settings.toolbarVisibility {
-        case .auto:
-            "Shows the toolbar only in Git repositories"
-        case .always:
-            "Shows the toolbar in every project"
-        case .hide:
-            "Keeps the toolbar hidden"
-        }
-    }
-
     var body: some View {
         CappedIdealHeight(maxHeight: 600) { form }
     }
@@ -48,18 +37,6 @@ struct SettingsView: View {
                     ForEach(AppLanguage.allCases) { language in
                         Text(verbatim: language.title).tag(language)
                     }
-                }
-
-                DescribedSettingsRow(
-                    "Toolbar",
-                    description: toolbarVisibilityDescription
-                ) {
-                    Picker("Toolbar", selection: $settings.toolbarVisibility) {
-                        Text("Auto").tag(ToolbarVisibility.auto)
-                        Text("Always Show").tag(ToolbarVisibility.always)
-                        Text("Hide").tag(ToolbarVisibility.hide)
-                    }
-                    .labelsHidden()
                 }
 
                 if settings.languageRequiresRelaunch {
@@ -270,7 +247,6 @@ struct SettingsView: View {
                         && settings.theme == .system
                         && settings.themeDark == Theme.defaultDarkThemeName
                         && settings.themeLight == Theme.defaultLightThemeName
-                        && settings.toolbarVisibility == AppSettings.defaultToolbarVisibility
                         && !settings.wrapLines
                         && !settings.restoreTerminalHistory
                         && settings.terminalNotifications

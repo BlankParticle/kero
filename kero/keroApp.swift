@@ -118,8 +118,8 @@ private struct KeroCommands: Commands {
             // outright. They act on the focused pane — Ghostty's search in a
             // terminal, STTextView's find bar in a file editor — rather than on
             // the first responder, which keeps them live while the find bar's
-            // text field has keyboard focus. ⇧⌘G is already Toggle Git Panel,
-            // so Find Previous is reachable by ⇧↩ in the bar instead.
+            // text field has keyboard focus. Find Previous has no shortcut of
+            // its own; it is reachable by ⇧↩ in the bar instead.
             Menu("Find") {
                 Button("Find…") {
                     manager?.performFindAction(.show)
@@ -184,20 +184,8 @@ private struct KeroCommands: Commands {
             .keyboardShortcut("b", modifiers: [.command, .shift])
             .disabled(manager?.selectedProject == nil)
 
-            Button("Toggle Files Panel") {
-                manager?.togglePanel(.files)
-            }
-            .keyboardShortcut("e", modifiers: [.command, .shift])
-            .disabled(manager?.selectedProject == nil)
-
-            Button("Toggle Git Panel") {
-                manager?.togglePanel(.git)
-            }
-            .keyboardShortcut("g", modifiers: [.command, .shift])
-            .disabled(manager?.selectedProject == nil)
-
             Button("Toggle Info Panel") {
-                manager?.togglePanel(.info)
+                manager?.togglePanel()
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
             .disabled(manager?.selectedProject == nil)

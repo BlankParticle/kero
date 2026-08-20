@@ -7,15 +7,6 @@ import AppKit
 import Combine
 import Foundation
 import SwiftUI
-import WebKit
-
-/// Panels available in the right sidebar. Raw values are stable names
-/// persisted in `SessionSnapshot`.
-enum RightPanel: String, Codable {
-    case files
-    case git
-    case info
-}
 
 /// One Find menu command, routed from the menu bar to whichever find
 /// implementation the focused pane owns: Ghostty's own search in a terminal,
@@ -35,20 +26,8 @@ enum FindAction {
 @MainActor
 final class TerminalManager: nonisolated ObservableObject {
     @Published var projects: [Project] = []
-    @Published var selectedProjectID: UUID? {
-        willSet {
-            // Diff hosts are expensive WebKit trees. Once a project has put
-            // them in this window, keep that project's stack mounted across
-            // project switches just as ContentView already does across tab
-            // switches. Reattaching every open diff can otherwise block the
-            // main thread while AppKit rebuilds the window/view hierarchy.
-            if let selectedProjectID, selectedProjectID != newValue {
-                retainedDiffProjectIDs.insert(selectedProjectID)
-            }
-        }
-    }
+    @Published var selectedProjectID: UUID?
     @Published var isPanelVisible = false
-    @Published var panelTab: RightPanel = .files
     /// Visibility of the left project sidebar (⌘B). `isPanelVisible` above is
     /// the separate right panel.
     @Published var isLeftSidebarVisible = true
@@ -60,10 +39,6 @@ final class TerminalManager: nonisolated ObservableObject {
     /// Projects publish their own changes (session list, session selection);
     /// re-publish them so views observing the manager stay current.
     private var projectObservations: [UUID: AnyCancellable] = [:]
-    /// Projects whose diff stacks have already been mounted in this window.
-    /// Unvisited restored projects stay lazy so launch does not instantiate all
-    /// of their WKWebViews at once.
-    private var retainedDiffProjectIDs: Set<UUID> = []
     private var projectCounter = 0
     private var settingsObservation: AnyCancellable?
     private var autosaveObservation: AnyCancellable?
@@ -192,16 +167,6 @@ final class TerminalManager: nonisolated ObservableObject {
 
     var selectedSession: TerminalSession? {
         selectedProject?.selectedSession
-    }
-
-    /// Diff stacks that should remain in the window hierarchy. The selected
-    /// project is included immediately; previously selected projects remain
-    /// only when they actually own a diff.
-    var projectsWithMountedDiffs: [Project] {
-        projects.filter {
-            $0.id == selectedProjectID
-                || (retainedDiffProjectIDs.contains($0.id) && $0.hasDiffs)
-        }
     }
 
     // MARK: - Projects
@@ -378,9 +343,8 @@ final class TerminalManager: nonisolated ObservableObject {
             let neighbor = min(index, projects.count - 1)
             selectedProjectID = neighbor >= 0 ? projects[neighbor].id : nil
         }
-        retainedDiffProjectIDs.remove(project.id)
         // Nothing left to inspect once the last project is gone, so collapse
-        // the right sidebar — its panels all track the selected session.
+        // the right sidebar — its panel tracks the selected session.
         if projects.isEmpty {
             isPanelVisible = false
         }
@@ -504,21 +468,20 @@ final class TerminalManager: nonisolated ObservableObject {
         switch selectedProject?.focusedContent {
         case .session(let session): session.find.perform(action)
         case .file(let file): file.performFindAction(action)
-        case .diff, .none: break
+        case .none: break
         }
     }
 
     /// Whether the Find menu has something searchable on screen right now.
-    /// Diffs render their own views rather than a searchable text view.
     var canFind: Bool {
         switch selectedProject?.focusedContent {
         case .session, .file: return true
-        case .diff, .none: return false
+        case .none: return false
         }
     }
 
     /// Whether Find and Replace has an editable pane to act on: terminal
-    /// output and diffs are read-only, so replace is only offered for a file.
+    /// output is read-only, so replace is only offered for a file.
     var canReplace: Bool {
         if case .file? = selectedProject?.focusedContent { return true }
         return false
@@ -557,7 +520,7 @@ final class TerminalManager: nonisolated ObservableObject {
     func resizePaneLeft() { selectedProject?.resizePaneLeft() }
     func resizePaneRight() { selectedProject?.resizePaneRight() }
 
-    /// Whether the focused pane can be split right now (false for diffs / no
+    /// Whether the focused pane can be split right now (false with no
     /// project).
     var canSplit: Bool { selectedProject?.canSplit ?? false }
 
@@ -593,47 +556,9 @@ final class TerminalManager: nonisolated ObservableObject {
         selectedProject?.openFileToSide(path)
     }
 
-    /// Opens a git diff tab in the current project.
-    func openDiff(
-        repoRoot: String, path: String, staged: Bool, untracked: Bool, origPath: String?
-    ) {
-        selectedProject?.openDiff(
-            repoRoot: repoRoot, path: path, staged: staged,
-            untracked: untracked, origPath: origPath
-        )
-    }
-
-    /// Opens the selected path as changed by one historical commit.
-    func openCommitDiff(
-        repoRoot: String,
-        path: String,
-        commitHash: String,
-        parentHash: String?,
-        status: Character,
-        origPath: String?
-    ) {
-        selectedProject?.openCommitDiff(
-            repoRoot: repoRoot,
-            path: path,
-            commitHash: commitHash,
-            parentHash: parentHash,
-            status: status,
-            origPath: origPath
-        )
-    }
-
-    /// Saves the focused pane if it holds a file or an editable diff.
+    /// Saves the focused pane if it holds a file.
     func saveSelectedFile() {
         selectedProject?.focusedContent?.save()
-    }
-
-    /// Propagates a file-tree rename to every open file tab across all
-    /// projects, so tabs for the moved file (or files under a moved
-    /// directory) keep pointing at the right place.
-    func fileRenamed(from oldPath: String, to newPath: String) {
-        for project in projects {
-            project.updateFilePaths(from: oldPath, to: newPath)
-        }
     }
 
     // MARK: - Panels & appearance
@@ -693,30 +618,13 @@ final class TerminalManager: nonisolated ObservableObject {
         }
     }
 
-    /// Terminal and editor responders are public host views. WebKit instead
-    /// makes a private descendant of WKWebView first responder, so walk its
-    /// AppKit ancestry before deciding whether palette dismissal can restore
-    /// the page's keyboard focus.
     private func isStableWorkspaceResponder(_ responder: NSResponder) -> Bool {
-        if responder is any TerminalBackendSurface || responder is FocusReportingTextView {
-            return true
-        }
-        var view = responder as? NSView
-        while let current = view {
-            if current is WKWebView { return true }
-            view = current.superview
-        }
-        return false
+        responder is any TerminalBackendSurface || responder is FocusReportingTextView
     }
 
-    /// Shows the sidebar on `panel`, or hides it if already showing that panel.
-    func togglePanel(_ panel: RightPanel) {
-        if isPanelVisible && panelTab == panel {
-            isPanelVisible = false
-        } else {
-            panelTab = panel
-            isPanelVisible = true
-        }
+    /// Shows or hides the right sidebar.
+    func togglePanel() {
+        isPanelVisible.toggle()
     }
 
     /// Re-themes every session after a light/dark appearance change.
@@ -838,8 +746,7 @@ final class TerminalManager: nonisolated ObservableObject {
             },
             selectedProjectIndex: projects.firstIndex { $0.id == selectedProjectID },
             isLeftSidebarVisible: isLeftSidebarVisible,
-            isRightPanelVisible: isPanelVisible,
-            rightPanelTab: panelTab
+            isRightPanelVisible: isPanelVisible
         )
         return (snapshot, histories)
     }
@@ -892,21 +799,6 @@ final class TerminalManager: nonisolated ObservableObject {
             return .session(workingDirectory: session.currentDirectoryPath)
         case .file(let file):
             return .file(path: file.path, editorState: file.editorState)
-        case .diff(let diff):
-            if let commitHash = diff.commitHash {
-                return .commitDiff(
-                    repoRoot: diff.repoRoot,
-                    path: diff.path,
-                    commitHash: commitHash,
-                    parentHash: diff.commitParentHash,
-                    status: diff.commitStatus.map(String.init) ?? "M",
-                    origPath: diff.origPath
-                )
-            }
-            return .diff(
-                repoRoot: diff.repoRoot, path: diff.path, staged: diff.staged,
-                untracked: diff.untracked, origPath: diff.origPath
-            )
         }
     }
 
@@ -916,7 +808,6 @@ final class TerminalManager: nonisolated ObservableObject {
     private func restore(from snapshot: SessionSnapshot) -> Bool {
         if let visible = snapshot.isLeftSidebarVisible { isLeftSidebarVisible = visible }
         if let visible = snapshot.isRightPanelVisible { isPanelVisible = visible }
-        if let tab = snapshot.rightPanelTab { panelTab = tab }
         for saved in snapshot.projects where !saved.tabs.isEmpty {
             let project = makeProject(createInitialSession: false)
             project.customName = Project.normalizedCustomName(saved.customName)

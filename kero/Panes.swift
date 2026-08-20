@@ -7,25 +7,18 @@ import AppKit
 import Combine
 import Foundation
 
-/// The leaf content of a pane: a terminal session, an open file, or a git
-/// diff. A project tab used to *be* one of these; now a tab is a recursive
-/// split layout, and this is what sits at each leaf.
+/// The leaf content of a pane: a terminal session or an open file. A project
+/// tab used to *be* one of these; now a tab is a recursive split layout, and
+/// this is what sits at each leaf.
 enum PaneContent: nonisolated Identifiable {
     case session(TerminalSession)
     case file(FileTab)
-    case diff(DiffTab)
 
     nonisolated var id: UUID {
         switch self {
         case .session(let session): return session.id
         case .file(let file): return file.id
-        case .diff(let diff): return diff.id
         }
-    }
-
-    var isDiff: Bool {
-        if case .diff = self { return true }
-        return false
     }
 
     var isFile: Bool {
@@ -40,7 +33,6 @@ extension PaneContent {
         switch self {
         case .session(let session): return session.title
         case .file(let file): return file.name
-        case .diff(let diff): return diff.title
         }
     }
 
@@ -48,16 +40,14 @@ extension PaneContent {
         switch self {
         case .session: return "terminal"
         case .file: return "doc.text"
-        case .diff: return "plus.forwardslash.minus"
         }
     }
 
-    /// File and diff panes both represent a concrete path. Their surrounding
-    /// chrome uses the same filename-aware icon as the file and Git panels.
+    /// A file pane represents a concrete path. Its surrounding chrome uses the
+    /// same filename-aware icon as file tabs elsewhere.
     @MainActor var fileIconPath: String? {
         switch self {
         case .file(let file): return file.path
-        case .diff(let diff): return diff.path
         case .session: return nil
         }
     }
@@ -65,7 +55,6 @@ extension PaneContent {
     @MainActor var isDirty: Bool {
         switch self {
         case .file(let file): return file.isDirty
-        case .diff(let diff): return diff.isDirty
         case .session: return false
         }
     }
@@ -73,7 +62,6 @@ extension PaneContent {
     @MainActor var saveError: String? {
         switch self {
         case .file(let file): return file.saveError
-        case .diff(let diff): return diff.saveError
         case .session: return nil
         }
     }
@@ -81,7 +69,6 @@ extension PaneContent {
     @MainActor func save() {
         switch self {
         case .file(let file): file.save()
-        case .diff(let diff): diff.save()
         case .session: break
         }
     }
@@ -373,8 +360,8 @@ final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
     nonisolated let id = UUID()
 
     /// User-assigned tab name; when nil the tab title follows the focused
-    /// pane's content (terminal title, file name, diff title) — the same
-    /// override scheme as `Project.customName`.
+    /// pane's content (terminal title, file name) — the same override scheme
+    /// as `Project.customName`.
     @Published var customName: String?
     @Published var layout: PaneNode
     @Published var focusedPaneID: UUID
@@ -388,10 +375,10 @@ final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
 
     /// The terminal whose directory this tab is oriented around when it holds
     /// no terminal of its own — captured from the focused session when a file
-    /// or diff is opened into a fresh tab. Lets the file-tree / git / info
-    /// panels keep tracking the directory the file was opened from instead of
-    /// falling back to the project's first session. Weak, so closing that
-    /// shell simply drops the association.
+    /// is opened into a fresh tab. Lets the info panel keep tracking the
+    /// directory the file was opened from instead of falling back to the
+    /// project's first session. Weak, so closing that shell simply drops the
+    /// association.
     weak var contextSession: TerminalSession?
 
     /// A fresh single-pane tab wrapping one piece of content.
@@ -426,18 +413,9 @@ final class PaneTab: nonisolated ObservableObject, nonisolated Identifiable {
         allContents.compactMap { if case .session(let session) = $0 { return session }; return nil }
     }
 
-    var diffs: [DiffTab] {
-        allContents.compactMap { if case .diff(let diff) = $0 { return diff }; return nil }
-    }
-
     var hasMultiplePanes: Bool { allPanes.count > 1 }
 
-    /// Splitting is disallowed while a diff is focused: diffs stay in their own
-    /// single-pane tab so their always-mounted web view keeps filling the tab.
-    var canSplit: Bool {
-        if case .diff? = focusedContent { return false }
-        return true
-    }
+    var canSplit: Bool { true }
 
     // MARK: - Navigation
 

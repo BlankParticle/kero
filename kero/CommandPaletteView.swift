@@ -242,14 +242,8 @@ struct CommandPaletteView: View {
             PaletteCommand(id: "toggle-sidebar", title: "Toggle Right Sidebar", systemImage: "sidebar.right", shortcut: "⇧⌘B") {
                 manager.toggleSidebar()
             },
-            PaletteCommand(id: "toggle-files", title: "Toggle Files Panel", systemImage: "doc.text", shortcut: "⇧⌘E") {
-                manager.togglePanel(.files)
-            },
-            PaletteCommand(id: "toggle-git", title: "Toggle Git Panel", systemImage: "arrow.triangle.branch", shortcut: "⇧⌘G") {
-                manager.togglePanel(.git)
-            },
             PaletteCommand(id: "toggle-info", title: "Toggle Info Panel", systemImage: "info.circle", shortcut: "⇧⌘I") {
-                manager.togglePanel(.info)
+                manager.togglePanel()
             },
             PaletteCommand(
                 id: "toggle-fps-counter",
@@ -785,16 +779,16 @@ struct CommandPaletteView: View {
     }
 
     private nonisolated static func gitProjectFilePaths(in root: String) -> Set<String>? {
-        var tracked = GitStatusModel.runGit(
+        var tracked = runGit(
             ["ls-files", "--cached", "--recurse-submodules", "-z"],
             in: root
         )
         // A missing or broken submodule should not disable search for the rest
         // of the repository.
         if tracked.status != 0 {
-            tracked = GitStatusModel.runGit(["ls-files", "--cached", "-z"], in: root)
+            tracked = runGit(["ls-files", "--cached", "-z"], in: root)
         }
-        let untracked = GitStatusModel.runGit(
+        let untracked = runGit(
             ["ls-files", "--others", "--exclude-standard", "-z"],
             in: root
         )
@@ -804,6 +798,64 @@ struct CommandPaletteView: View {
 
     private nonisolated static func nulSeparatedPaths(_ output: String) -> [String] {
         output.split(separator: "\0").map(String.init)
+    }
+
+    /// Runs Git while draining stdout and stderr concurrently, used only for
+    /// the ignore-aware project file index above.
+    private nonisolated static func runGit(
+        _ args: [String], in dir: String
+    ) -> (status: Int32, stdout: String, stderr: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+        process.currentDirectoryURL = URL(fileURLWithPath: dir, isDirectory: true)
+        var env = ProcessInfo.processInfo.environment
+        env["GIT_OPTIONAL_LOCKS"] = "0"
+        // Fail rather than hanging on a credential prompt behind the app.
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["LC_ALL"] = "C"
+        process.environment = env
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        process.standardInput = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            return (-1, "", error.localizedDescription)
+        }
+        let outData = PipeData()
+        let errData = PipeData()
+        let readers = DispatchGroup()
+        let readerQualityOfService = Thread.current.qualityOfService
+        readers.enter()
+        let stdoutReader = Thread {
+            outData.value = stdout.fileHandleForReading.readDataToEndOfFile()
+            readers.leave()
+        }
+        stdoutReader.qualityOfService = readerQualityOfService
+        stdoutReader.start()
+        readers.enter()
+        let stderrReader = Thread {
+            errData.value = stderr.fileHandleForReading.readDataToEndOfFile()
+            readers.leave()
+        }
+        stderrReader.qualityOfService = readerQualityOfService
+        stderrReader.start()
+        process.waitUntilExit()
+        readers.wait()
+        return (
+            process.terminationStatus,
+            String(data: outData.value, encoding: .utf8) ?? "",
+            String(data: errData.value, encoding: .utf8) ?? ""
+        )
+    }
+
+    private nonisolated final class PipeData: @unchecked Sendable {
+        var value = Data()
     }
 
     private nonisolated static func projectFiles(

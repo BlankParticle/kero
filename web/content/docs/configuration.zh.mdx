@@ -33,21 +33,9 @@ Kero 大多数持久化设置都在一个文件里：
 
 字符串——默认 `"Default Dark"` 和 `"Default Light"`
 
-两种外观各自使用的配色主题。它会同时重绘终端、窗口装饰、侧边栏、编辑器和 diff。Kero 自带的默认主题保留半透明侧边栏，其他主题会把侧边栏刷成与自身配色一致。
+两种外观各自使用的配色主题。它会同时重绘终端、窗口装饰、侧边栏和编辑器。Kero 自带的默认主题保留半透明侧边栏，其他主题会把侧边栏刷成与自身配色一致。
 
 设置窗口列出两个终端后端共同支持的精选主题。手写名称必须与列表里的显示名完全一致，包括大小写；否则会回退到对应的默认主题。
-
-### `toolbar.visibility`
-
-`"hide"` · `"auto"` · `"always"`——默认 `"hide"`
-
-控制当前标签页下方的紧凑工具栏：
-
-- `"hide"` 始终隐藏。
-- `"auto"` 只在项目目录是 Git 仓库时显示。
-- `"always"` 在每个项目里显示；不是仓库时会显示 **No Git Repository**。
-
-它具体展示什么，见 [Git 工具栏](/zh/docs/git#git-工具栏)。
 
 ## 文字
 
@@ -55,7 +43,7 @@ Kero 大多数持久化设置都在一个文件里：
 
 字符串——默认 `""`，表示内置的 JetBrains Mono
 
-终端、编辑器和 diff 共用这个字族。请写字族名，不要写具体字重：`"IBM Plex Mono"`，而不是
+终端和编辑器共用这个字族。请写字族名，不要写具体字重：`"IBM Plex Mono"`，而不是
 `"IBM Plex Mono Regular"`。不存在或非等宽的字族会回退到内置默认值。
 
 Kero 还会附加 Symbols Nerd Font 作为后备，所以即使选中的字族不是打过补丁的 Nerd Font，
@@ -65,7 +53,7 @@ Powerline 分隔符和图标字形也能正常显示。
 
 数字，8–32——默认 `13`
 
-终端、编辑器和 diff 共用的字号，单位是磅。这是唯一一个即使等于默认值，Kero 也会写进文件的键。
+终端和编辑器共用的字号，单位是磅。这是唯一一个即使等于默认值，Kero 也会写进文件的键。
 
 ### `sidebar.font-size`
 
@@ -83,8 +71,7 @@ Powerline 分隔符和图标字形也能正常显示。
 
 布尔值——默认 `false`
 
-在[文件编辑器](/zh/docs/files)里按窗格宽度软折行。关闭时长行横向滚动；它不会改变终端或 diff
-里的折行行为。
+在文件编辑器里按窗格宽度软折行。关闭时长行横向滚动；它不会改变终端里的折行行为。
 
 ## 终端
 
@@ -129,7 +116,6 @@ theme-light = "Catppuccin Latte"
 font-family = "IBM Plex Mono"
 font-size = 14
 sidebar.font-size = 13
-toolbar.visibility = "auto"
 terminal.font-thicken = true
 terminal.macos-option-as-alt = false
 terminal.backend = "alacritty"
@@ -144,7 +130,7 @@ ai.enabled = true
 
 - **语言。** 设置里可选「跟随系统」、English、简体中文和日本語。它使用 macOS 的单应用语言偏好，并且要重启后生效，所以不存进 TOML。
 - **自动检查更新。** **设置 → Updates** 里的开关属于 Sparkle。见[安装](/zh/docs/installation#更新)。
-- **窗口与布局状态。** 窗口尺寸、侧边栏宽度、当前面板、项目、标签页、窗格、浏览器 URL 和
-  diff 控件偏好，都存在 Kero 的 macOS 偏好设置或会话快照里。
+- **窗口与布局状态。** 窗口尺寸、侧边栏宽度、面板可见性、项目、标签页和窗格，都存在 Kero
+  的 macOS 偏好设置或会话快照里。
 - **后端自己的配置文件。** Kero 不读取 `~/.config/ghostty`，也不读取 Alacritty 配置。Kero 的设置就是两个后端共同支持的配置面。
 - **快捷键。** 目前[快捷键](/zh/docs/shortcuts)是固定的。
