@@ -41,6 +41,13 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
     private static let persistedHistoryLineLimit = 500
 
     private let shellPath: String
+    /// True when the session was launched with an explicit argv (`kero vim x`)
+    /// rather than a login shell; the automatic title then keeps naming that
+    /// command instead of following the working directory.
+    private let isDirectCommand: Bool
+    /// Set once a program supplies a real title escape. Automatic titles stop
+    /// until an empty title clears it again — Ghostty's `seen_title` rule.
+    private var titleSetByProgram = false
     private let launchWorkingDirectory: String
     private let launchDirectoryURL: URL?
     private let shellPidFileURL: URL?
@@ -86,10 +93,13 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         id = sessionID
         self.shellPath = shellPath
         self.backend = backend
+        isDirectCommand = directCommand != nil
         launchWorkingDirectory = directory
         launchDirectoryURL = artifacts.directoryURL
         shellPidFileURL = artifacts.pidFileURL
-        title = (shellPath as NSString).lastPathComponent
+        title = directCommand != nil
+            ? (shellPath as NSString).lastPathComponent
+            : Self.abbreviatedDisplayPath(directory)
         agentStatus = nil
 
         let surface = Self.makeSurface(backend: backend, launch: launch)
@@ -277,6 +287,65 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
         (shellPath as NSString).lastPathComponent
     }
 
+    // MARK: - Automatic titles
+
+    /// Ghostty-style automatic tab titles. While no program has set a title
+    /// escape, the tab shows the foreground command while one runs and the
+    /// home-abbreviated working directory at the prompt — the same look
+    /// Ghostty's shell integration produces, but synthesized from kernel
+    /// process metadata so it works with any shell and either backend.
+    /// Called from escape handlers and from the shared session monitor tick.
+    func refreshAutomaticTitle() {
+        guard !titleSetByProgram, !hasExited else { return }
+        let generated = generatedTitle()
+        if title != generated { title = generated }
+    }
+
+    private func generatedTitle() -> String {
+        if let foreground = surface.foregroundPid, foreground > 0,
+           foreground != shellPid,
+           let command = Self.commandTitle(pid: foreground) {
+            return command
+        }
+        if isDirectCommand { return shellName }
+        return Self.abbreviatedDisplayPath(currentDirectoryPath)
+    }
+
+    /// The foreground job as a command line: argv with the executable reduced
+    /// to its basename, control characters stripped, bounded like Ghostty's
+    /// 256-byte title limit.
+    private static func commandTitle(pid: pid_t) -> String? {
+        var words: [String]
+        if let arguments = processArguments(pid: pid), !arguments.isEmpty {
+            words = arguments
+            words[0] = (words[0] as NSString).lastPathComponent
+        } else if let executable = processExecutablePath(pid: pid) {
+            words = [(executable as NSString).lastPathComponent]
+        } else {
+            return nil
+        }
+        let line = words.joined(separator: " ")
+            .components(separatedBy: .controlCharacters).joined()
+            .trimmingCharacters(in: .whitespaces)
+        guard !line.isEmpty else { return nil }
+        guard line.count > 256 else { return line }
+        return String(line.prefix(255)) + "…"
+    }
+
+    /// zsh's `%(4~|…/%3~|%~)`: home becomes `~`, and a path deeper than three
+    /// components collapses to `…/` plus the last three.
+    private static func abbreviatedDisplayPath(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var display = path
+        if display == home { return "~" }
+        if display.hasPrefix(home + "/") {
+            display = "~" + display.dropFirst(home.count)
+        }
+        let components = display.split(separator: "/")
+        guard components.count >= 4 else { return display }
+        return "…/" + components.suffix(3).joined(separator: "/")
+    }
+
     /// PID of the root terminal process. The launch shim records its own PID
     /// before `exec`, so this remains stable while a shell's foreground PID
     /// moves to child jobs and back.
@@ -436,7 +505,14 @@ final class TerminalSession: NSObject, nonisolated ObservableObject, nonisolated
 
 extension TerminalSession: TerminalBackendEvents {
     func terminalDidChangeTitle(_ title: String) {
-        guard !title.isEmpty else { return }
+        guard !title.isEmpty else {
+            // An empty title hands control back to automatic titles,
+            // matching Ghostty's treatment of a bare `OSC 2;`.
+            titleSetByProgram = false
+            refreshAutomaticTitle()
+            return
+        }
+        titleSetByProgram = true
         self.title = title
     }
 
@@ -444,6 +520,7 @@ extension TerminalSession: TerminalBackendEvents {
         guard !path.isEmpty else { return }
         workingDirectory = path.hasPrefix("/")
             ? URL(fileURLWithPath: path).absoluteString : path
+        refreshAutomaticTitle()
     }
 
     func terminalDidChangeCellSize(_ size: CGSize) {
@@ -487,6 +564,7 @@ extension TerminalSession: TerminalBackendEvents {
             commandExecutionStartedAtNanos = nil
         }
         commandLifecycle = lifecycle
+        refreshAutomaticTitle()
     }
 
     func terminalDidClose(processAlive: Bool) {

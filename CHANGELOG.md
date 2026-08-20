@@ -16,6 +16,7 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Tabs title themselves like Ghostty: the running command while one executes, and the home-abbreviated working directory at the prompt — no shell configuration needed; titles set by programs still win
 - Remove the Git panel, the branch toolbar, the diff viewer, and the Files panel: Kero no longer runs git for you or shows diffs; the right sidebar now holds only the Info panel (⇧⌘I). The file editor stays — open files from the command palette or by Command-right-clicking paths in the terminal
 - Remove the embedded browser: browser tabs and panes, the Browser menu, and related shortcuts are gone
 - Remove agent status from the terminal UI: no more pane, tab, and sidebar badges, agent notifications, or the attention shortcut; `kero +agent` automation is unchanged

@@ -206,6 +206,9 @@ final class AgentAutomationMonitor {
     private func refresh() {
         let liveSessions = sessions.allObjects.filter { !$0.hasExited }
         for session in liveSessions {
+            // The same tick keeps automatic tab titles tracking the
+            // foreground job without a second per-session timer.
+            session.refreshAutomaticTitle()
             session.refreshAutomationAgentState(
                 isFocused: TerminalManager.automationIsSessionFocused(session.id)
             )

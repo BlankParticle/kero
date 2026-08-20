@@ -78,9 +78,13 @@ directory when neither is known.
 
 ### Tab titles
 
-Tabs are titled by whatever the terminal reports — your shell's prompt escape,
-or the program currently running. Right-click a tab to **Rename…** it by hand,
-and **Use Automatic Title** to go back to following the terminal.
+Tabs title themselves: while a command runs the tab shows it (`sleep 30`,
+`vim notes.md`), and back at the prompt it shows the working directory,
+home-abbreviated and collapsed to `…/` plus the last three components when
+deep. No shell configuration is needed — Kero reads the foreground process
+from the kernel — and a program that sets its own title with an escape
+sequence always wins. Right-click a tab to **Rename…** it by hand, and
+**Use Automatic Title** to go back to following the terminal.
 
 The rest of the tab menu is the usual set: **Close**, **Close Others**, **Close
 Tabs to the Right**, **Close All**, plus **Reveal in Finder** and **Copy
