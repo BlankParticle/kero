@@ -216,6 +216,17 @@ struct SettingsView: View {
                     )
                     .labelsHidden()
                 }
+
+                DescribedSettingsRow(
+                    "Bell and notifications",
+                    description: "Plays terminal bell sounds and sends notifications for terminal and agent activity"
+                ) {
+                    Toggle(
+                        "Bell and notifications",
+                        isOn: $settings.terminalNotifications
+                    )
+                    .labelsHidden()
+                }
             }
 
             Section("Text Editing") {
@@ -262,6 +273,7 @@ struct SettingsView: View {
                         && settings.toolbarVisibility == AppSettings.defaultToolbarVisibility
                         && !settings.wrapLines
                         && !settings.restoreTerminalHistory
+                        && settings.terminalNotifications
                         && !settings.aiEnabled
                         && settings.terminalBackend == .fallback)
                 }

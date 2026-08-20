@@ -455,6 +455,7 @@ extension TerminalSession: TerminalBackendEvents {
     }
 
     func terminalDidRingBell() {
+        guard AppSettings.shared.terminalNotifications else { return }
         NSSound.beep()
         guard !surface.hasEffectiveTerminalFocus else { return }
         TerminalNotificationService.shared.post(

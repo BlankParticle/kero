@@ -212,6 +212,12 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
+    /// Play terminal bell sounds and surface terminal-initiated or agent
+    /// activity through Notification Center. On by default.
+    @Published var terminalNotifications: Bool {
+        didSet { save() }
+    }
+
     /// Link Kero's shared coordination skill plus the native lifecycle
     /// integrations whose provider APIs provide semantic turn events. Other
     /// agents retain process recognition without inferred progress state.
@@ -266,6 +272,7 @@ final class AppSettings: nonisolated ObservableObject {
         macosOptionAsAlt = toml["terminal.macos-option-as-alt"]?.bool ?? false
         wrapLines = toml["editor.wrap-lines"]?.bool ?? false
         restoreTerminalHistory = toml["terminal.restore-history"]?.bool ?? false
+        terminalNotifications = toml["terminal.notifications"]?.bool ?? true
         aiEnabled = toml["ai.enabled"]?.bool ?? false
         terminalBackend = TerminalBackend(persisted: toml["terminal.backend"]?.string)
         applyAppearance()
@@ -317,6 +324,7 @@ final class AppSettings: nonisolated ObservableObject {
         macosOptionAsAlt = false
         wrapLines = false
         restoreTerminalHistory = false
+        terminalNotifications = true
         if aiEnabled {
             do {
                 try setAIEnabled(false)
@@ -404,6 +412,9 @@ final class AppSettings: nonisolated ObservableObject {
         }
         if restoreTerminalHistory {
             lines.append("terminal.restore-history = true")
+        }
+        if !terminalNotifications {
+            lines.append("terminal.notifications = false")
         }
         if aiEnabled {
             lines.append("ai.enabled = true")

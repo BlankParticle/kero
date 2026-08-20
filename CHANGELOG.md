@@ -16,6 +16,8 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Add a Terminal setting to disable audible bells and terminal or agent notifications
+
 ## [0.1.47]
 
 - Let dictation and other accessibility tools enter text in terminal panes

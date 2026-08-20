@@ -36,6 +36,7 @@ final class TerminalNotificationService: NSObject, UNUserNotificationCenterDeleg
     }
 
     func post(message: String, sessionID: UUID? = nil) {
+        guard AppSettings.shared.terminalNotifications else { return }
         guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             self?.checkAuthorization(for: message, sessionID: sessionID)
