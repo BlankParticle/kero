@@ -707,8 +707,7 @@ private struct SessionPaneHeaderTitle: View {
         PaneHeaderLabel(
             systemImage: "terminal",
             title: session.title,
-            isFocused: isFocused,
-            agentRollup: session.agentRollup
+            isFocused: isFocused
         )
     }
 }
@@ -735,7 +734,6 @@ private struct PaneHeaderLabel: View {
     let title: String
     let isFocused: Bool
     var isDirty = false
-    var agentRollup: KeroAgentRollup? = nil
 
     var body: some View {
         HStack(spacing: 6) {
@@ -755,10 +753,6 @@ private struct PaneHeaderLabel: View {
                 .foregroundStyle(isFocused ? .primary : .secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            if let agentRollup {
-                AgentStatusBadgeRepresentable(rollup: agentRollup)
-                    .fixedSize()
-            }
             if isDirty {
                 Circle()
                     .fill(.secondary)

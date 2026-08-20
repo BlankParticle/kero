@@ -226,14 +226,6 @@ private struct KeroCommands: Commands {
             }
         }
 
-        CommandMenu("Agents") {
-            Button("Next Agent Needing Attention") {
-                manager?.focusNextAgentAttention()
-            }
-            .keyboardShortcut("a", modifiers: [.command, .shift])
-            .disabled(manager?.hasAgentAttention != true)
-        }
-
         CommandMenu("Tabs") {
             Button("Split Right") {
                 manager?.splitRight()

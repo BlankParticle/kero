@@ -17,7 +17,8 @@ the original feature bullet instead of adding separate entries for them.
 ## [unreleased]
 
 - Remove the embedded browser: browser tabs and panes, the Browser menu, and related shortcuts are gone
-- Add a Terminal setting to disable audible bells and terminal or agent notifications
+- Remove agent status from the terminal UI: no more pane, tab, and sidebar badges, agent notifications, or the attention shortcut; `kero +agent` automation is unchanged
+- Add a Terminal setting to disable audible bells and terminal notifications
 
 ## [0.1.47]
 

@@ -132,17 +132,6 @@ enum KeroAgentPhase: String, Codable, CaseIterable, Sendable {
     case done
     case idle
     case unknown
-
-    fileprivate var rollupPriority: Int {
-        switch self {
-        case .blocked: return 6
-        case .done: return 5
-        case .working: return 4
-        case .unknown: return 3
-        case .created: return 2
-        case .idle: return 1
-        }
-    }
 }
 
 enum KeroAgentStateAuthority: String, Codable, Sendable {
@@ -165,11 +154,6 @@ struct KeroAgentStatus: Equatable, Sendable {
     /// Completion remains unseen until the pane itself receives focus. Reads
     /// through the automation API deliberately do not mutate this bit.
     let unseen: Bool
-}
-
-struct KeroAgentRollup: Equatable {
-    let phase: KeroAgentPhase
-    let count: Int
 }
 
 enum KeroAutomationReadError: Error {
@@ -695,7 +679,6 @@ extension TerminalSession {
             return
         }
 
-        let previousPhase = agentStatus?.phase
         agentStatus = KeroAgentStatus(
             alias: alias,
             kind: kind,
@@ -706,49 +689,5 @@ extension TerminalSession {
             processID: processID,
             unseen: unseen
         )
-
-        guard phase != previousPhase,
-              phase == .blocked || phase == .done,
-              !TerminalManager.automationIsSessionFocused(id)
-        else { return }
-        TerminalNotificationService.shared.post(
-            message: phase == .blocked
-                ? String(localized: "\(alias) needs attention")
-                : String(localized: "\(alias) finished"),
-            sessionID: id
-        )
-    }
-}
-
-extension PaneTab {
-    var agentRollup: KeroAgentRollup? {
-        Self.rollup(sessions.compactMap(\.agentStatus))
-    }
-
-    fileprivate static func rollup(_ statuses: [KeroAgentStatus]) -> KeroAgentRollup? {
-        // Idle and unknown remain useful to automation clients, but neither is
-        // actionable enough to occupy persistent pane, tab, or project chrome.
-        let visibleStatuses = statuses.filter {
-            $0.phase != .idle && $0.phase != .unknown
-        }
-        guard let phase = visibleStatuses.map(\.phase).max(by: {
-            $0.rollupPriority < $1.rollupPriority
-        }) else { return nil }
-        return KeroAgentRollup(
-            phase: phase,
-            count: visibleStatuses.filter { $0.phase == phase }.count
-        )
-    }
-}
-
-extension TerminalSession {
-    var agentRollup: KeroAgentRollup? {
-        PaneTab.rollup(agentStatus.map { [$0] } ?? [])
-    }
-}
-
-extension Project {
-    var agentRollup: KeroAgentRollup? {
-        PaneTab.rollup(sessions.compactMap(\.agentStatus))
     }
 }

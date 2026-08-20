@@ -212,8 +212,8 @@ final class AppSettings: nonisolated ObservableObject {
         didSet { save() }
     }
 
-    /// Play terminal bell sounds and surface terminal-initiated or agent
-    /// activity through Notification Center. On by default.
+    /// Play terminal bell sounds and surface terminal-initiated activity
+    /// through Notification Center. On by default.
     @Published var terminalNotifications: Bool {
         didSet { save() }
     }

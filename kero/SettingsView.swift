@@ -219,7 +219,7 @@ struct SettingsView: View {
 
                 DescribedSettingsRow(
                     "Bell and notifications",
-                    description: "Plays terminal bell sounds and sends notifications for terminal and agent activity"
+                    description: "Plays terminal bell sounds and sends notifications for terminal activity"
                 ) {
                     Toggle(
                         "Bell and notifications",

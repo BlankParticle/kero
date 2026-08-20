@@ -121,12 +121,6 @@
         }
       }
     },
-    "%@ finished" : {
-
-    },
-    "%@ needs attention" : {
-
-    },
     "%@ palette · Tab switches appearance" : {
       "localizations" : {
         "ja" : {
@@ -265,24 +259,6 @@
     },
     "%lld" : {
       "shouldTranslate" : false
-    },
-    "%lld agents finished" : {
-
-    },
-    "%lld agents idle" : {
-
-    },
-    "%lld agents in an unknown state" : {
-
-    },
-    "%lld agents need attention" : {
-
-    },
-    "%lld agents starting" : {
-
-    },
-    "%lld agents working" : {
-
     },
     "%lld fps" : {
 
@@ -543,28 +519,7 @@
         }
       }
     },
-    "Agent finished" : {
-
-    },
-    "Agent idle" : {
-
-    },
-    "Agent needs attention" : {
-
-    },
-    "Agent starting" : {
-
-    },
-    "Agent state unknown" : {
-
-    },
-    "Agent working" : {
-
-    },
     "AI" : {
-
-    },
-    "Agents" : {
 
     },
     "Allow" : {
@@ -4032,9 +3987,6 @@
           }
         }
       }
-    },
-    "Next Agent Needing Attention" : {
-
     },
     "Next match" : {
       "localizations" : {

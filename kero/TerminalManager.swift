@@ -483,42 +483,6 @@ final class TerminalManager: nonisolated ObservableObject {
         return false
     }
 
-    var hasAgentAttention: Bool {
-        projects.contains { project in
-            project.sessions.contains {
-                $0.agentStatus?.phase == .blocked || $0.agentStatus?.phase == .done
-            }
-        }
-    }
-
-    /// Cycles blocked agents first, then unseen completions, preserving project,
-    /// tab, and split-tree order within each state. Only an explicit focus
-    /// action acknowledges `done`; automation reads never call this path.
-    func focusNextAgentAttention() {
-        let ordered = projects.flatMap { project in
-            project.tabs.flatMap(\.sessions)
-        }
-        let attention = ordered.filter { $0.agentStatus?.phase == .blocked }
-            + ordered.filter { $0.agentStatus?.phase == .done }
-        guard !attention.isEmpty else { return }
-
-        let currentID: UUID? = {
-            guard let pane = selectedProject?.selectedTab?.focusedPane,
-                  case .session(let session) = pane.content else { return nil }
-            return session.id
-        }()
-        let next: TerminalSession
-        if let currentID,
-           let index = attention.firstIndex(where: { $0.id == currentID }) {
-            next = attention[(index + 1) % attention.count]
-        } else {
-            next = attention[0]
-        }
-        revealSession(next)
-        next.markAutomationAgentSeen()
-        window?.makeKeyAndOrderFront(nil)
-    }
-
     /// Clears the terminal in the focused pane. No-op while another content
     /// kind is focused, so ⌘K never wipes an off-screen terminal.
     func clearActiveTerminal() {
