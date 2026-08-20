@@ -1,2 +1,3 @@
-// Personal code-signing settings. This file is intentionally ignored by Git.
-DEVELOPMENT_TEAM = GJE9R5VE87
+// Personal code-signing settings. Signing uses the self-signed
+// "BlankParticle" identity set in the project; no Apple team needed.
+DEVELOPMENT_TEAM =
