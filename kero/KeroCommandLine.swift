@@ -595,7 +595,7 @@ private func printHelp() {
 
 private func run() throws {
     let arguments = Array(CommandLine.arguments.dropFirst())
-    if arguments == ["+help"] {
+    if arguments == ["+help"] || arguments.first == "--help" || arguments.first == "-h" {
         printHelp()
         return
     }
@@ -668,15 +668,17 @@ private func run() throws {
 
 enum KeroCommandLine {
     /// The per-process bridge variables identify invocations from a Kero
-    /// terminal. A `+` action is also CLI-shaped so `kero +help` works when the
-    /// executable is called directly. Other arguments may belong to AppKit or
-    /// Xcode and must continue through the normal application entry point.
+    /// terminal. A `+` action or a help flag is also CLI-shaped so `kero +help`
+    /// and `kero --help` work when the executable is called directly. Other
+    /// arguments may belong to AppKit or Xcode and must continue through the
+    /// normal application entry point.
     static var shouldRun: Bool {
         let environment = ProcessInfo.processInfo.environment
         let hasBridge = environment["KERO_CLI_STATE"]?.isEmpty == false
             && environment["KERO_CLI_TOKEN"]?.isEmpty == false
         if hasBridge { return true }
-        return CommandLine.arguments.dropFirst().first?.hasPrefix("+") == true
+        guard let first = CommandLine.arguments.dropFirst().first else { return false }
+        return first.hasPrefix("+") || first == "--help" || first == "-h"
     }
 
     static func main() -> Never {
